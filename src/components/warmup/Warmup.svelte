@@ -10,8 +10,10 @@
   import MiniQuiz from "./MiniQuiz.svelte";
   import EarTraining from "../EarTraining.svelte";
   import NoteFinder from "./NoteFinder.svelte";
+  import GrooveTrainer from "../GrooveTrainer.svelte";
+  import BassLineLab from "../BassLineLab.svelte";
 
-  type View = "rutina" | "explorar" | "teoria" | "quiz" | "oido" | "notas";
+  type View = "rutina" | "explorar" | "teoria" | "quiz" | "oido" | "notas" | "groove" | "lineas";
   const VIEWS: { id: View; label: string }[] = [
     { id: "rutina", label: "Rutina" },
     { id: "explorar", label: "Explorar escalas" },
@@ -19,6 +21,8 @@
     { id: "quiz", label: "Quiz" },
     { id: "oido", label: "Oído" },
     { id: "notas", label: "Encontrar notas" },
+    { id: "groove", label: "Groove" },
+    { id: "lineas", label: "Líneas de bajo" },
   ];
 
   let view = $state<View>("rutina");
@@ -66,8 +70,12 @@
       <MiniQuiz />
     {:else if view === "oido"}
       <EarTraining />
-    {:else}
+    {:else if view === "notas"}
       <NoteFinder bind:instrument />
+    {:else if view === "groove"}
+      <GrooveTrainer />
+    {:else}
+      <BassLineLab />
     {/if}
   </div>
 </div>

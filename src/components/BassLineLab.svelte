@@ -202,7 +202,10 @@
   button:focus-visible, select:focus-visible, input:focus-visible, .fret-scroll:focus-visible { outline:3px solid var(--focus-ring); outline-offset:3px; }
   .legend { font-size:.75rem; gap:8px 16px; }
   .legend span { display:flex; align-items:center; gap:5px; color:var(--text); }
-  .legend b, thead span, td strong { background:var(--degree-bg); color:var(--degree-ink); border-radius:4px; padding:2px 5px; }
+  .legend b, thead span { background:var(--degree-bg); color:var(--degree-ink); border-radius:4px; padding:2px 5px; }
+  /* En la tablatura el número es el traste: neutro, con borde del color del grado. */
+  td strong { background:var(--surface); color:var(--text); border:2px solid var(--degree-bg); border-radius:4px; padding:1px 5px; font-family:"JetBrains Mono",monospace; }
+  td strong.degree-fifth { border-color:var(--muted); }
   .degree-R { --degree-bg:var(--coral); --degree-ink:var(--ink); }
   .degree-third { --degree-bg:var(--lime); --degree-ink:var(--ink); }
   .degree-fifth { --degree-bg:var(--surface-muted); --degree-ink:var(--text); }
