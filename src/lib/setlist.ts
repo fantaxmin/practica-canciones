@@ -9,20 +9,32 @@ function shuffle<T>(items: T[]): T[] {
   return result;
 }
 
+export function normalizeArtist(artist: string | undefined): string {
+  return (artist ?? "").trim().toLowerCase();
+}
+
+/** Quita las canciones de los artistas excluidos (sin distinguir mayúsculas ni espacios). */
+export function withoutExcludedArtists(songs: Song[], excludedArtists: readonly string[] = []): Song[] {
+  if (!excludedArtists.length) return songs;
+  const excluded = new Set(excludedArtists.map(normalizeArtist));
+  return songs.filter((song) => !excluded.has(normalizeArtist(song.artist)));
+}
+
 /**
  * Arma un setlist aleatorio para un instrumento que no supere targetSeconds.
  * Si se indica priorityArtist, sus canciones van primero. Dentro de cada grupo
  * prioriza canciones no practicadas recientemente, pero el orden es aleatorio
- * para variar entre generaciones.
+ * para variar entre generaciones. Las canciones de excludedArtists nunca entran.
  */
 export function generateSetlist(
   songs: Song[],
   instrument: Instrument,
   targetSeconds: number,
-  priorityArtist?: string
+  priorityArtist?: string,
+  excludedArtists: readonly string[] = []
 ): Song[] {
   if (!Number.isFinite(targetSeconds) || targetSeconds <= 0) return [];
-  const candidates = songs.filter((s) => s.instruments[instrument] && Number.isFinite(s.durationSeconds) && s.durationSeconds > 0);
+  const candidates = withoutExcludedArtists(songs, excludedArtists).filter((s) => s.instruments[instrument] && Number.isFinite(s.durationSeconds) && s.durationSeconds > 0);
 
   const normalizedArtist = priorityArtist?.trim().toLowerCase();
   const priority = normalizedArtist

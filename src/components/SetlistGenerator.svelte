@@ -3,7 +3,8 @@
   import type { Instrument, Song, Tab } from "../lib/types";
   import { formatMmSs } from "../lib/duration";
   import { daysSince } from "../lib/freshness";
-  import { generateSetlist } from "../lib/setlist";
+  import { generateSetlist, normalizeArtist, withoutExcludedArtists } from "../lib/setlist";
+  import { excludedArtists } from "../lib/setlistPrefs";
   import { songs } from "../lib/stores";
   import { extractYoutubeId } from "../lib/youtube";
   import { logPractice } from "../lib/practiceLog";
@@ -22,7 +23,11 @@
   let minutesInput = $state<HTMLInputElement>();
   let now = $state(Date.now());
 
-  const candidates = $derived($songs.filter((song) => song.instruments[instrument]));
+  const instrumentSongs = $derived($songs.filter((song) => song.instruments[instrument]));
+  const instrumentArtists = $derived([...new Set(instrumentSongs.map((song) => song.artist.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es")));
+  const isExcluded = (artist: string) => $excludedArtists.some((item) => normalizeArtist(item) === normalizeArtist(artist));
+  const excludedHere = $derived(instrumentArtists.filter(isExcluded));
+  const candidates = $derived(withoutExcludedArtists(instrumentSongs, $excludedArtists));
   const availableArtists = $derived([...new Set(candidates.map((song) => song.artist.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es")));
   const validMinutes = $derived(minutes !== undefined && Number.isInteger(minutes) && minutes >= 1 && minutes <= 240);
   const minutesError = $derived(validMinutes ? "" : "Escribe entre 1 y 240 minutos enteros.");
@@ -41,7 +46,8 @@
   const targetSeconds = $derived(($practiceSession?.minutes ?? 0) * 60);
   const fillPercent = $derived(targetSeconds > 0 ? Math.min(100, (practicedSeconds / targetSeconds) * 100) : 0);
   const minimumMinutes = $derived.by(() => {
-    const eligible = $songs.filter((song) => song.instruments[$practiceSession?.instrument ?? instrument] && song.durationSeconds > 0);
+    const eligible = withoutExcludedArtists($songs, $practiceSession?.excludedArtists ?? $excludedArtists)
+      .filter((song) => song.instruments[$practiceSession?.instrument ?? instrument] && song.durationSeconds > 0);
     return eligible.length ? Math.ceil(Math.min(...eligible.map((song) => song.durationSeconds)) / 60) : null;
   });
 
@@ -67,11 +73,22 @@
 
   function generate() {
     if (!validMinutes || !candidates.length || minutes === undefined) return;
-    const result = generateSetlist($songs, instrument, minutes * 60, priorityArtist || undefined);
-    practiceSession.set({ instrument, minutes, priorityArtist, songIds: result.map((song) => song.id), currentIndex: 0, practicedIds: [], warmup: result.length ? "pending" : undefined });
+    const result = generateSetlist($songs, instrument, minutes * 60, priorityArtist || undefined, excludedHere);
+    practiceSession.set({ instrument, minutes, priorityArtist, excludedArtists: excludedHere, songIds: result.map((song) => song.id), currentIndex: 0, practicedIds: [], warmup: result.length ? "pending" : undefined });
     controlsOpen = false;
     media = null;
     void focusCurrent();
+  }
+
+  function toggleExcluded(artist: string) {
+    excludedArtists.update((list) => isExcluded(artist)
+      ? list.filter((item) => normalizeArtist(item) !== normalizeArtist(artist))
+      : [...list, artist]);
+  }
+
+  function clearExcluded() {
+    const here = new Set(instrumentArtists.map(normalizeArtist));
+    excludedArtists.update((list) => list.filter((item) => !here.has(normalizeArtist(item))));
   }
 
   function increaseTime() {
@@ -140,7 +157,7 @@
   <h2 tabindex="-1">Generar setlist</h2>
   {#if $practiceSession && !controlsOpen}
     <div class="controls-summary">
-      <p>{$practiceSession.instrument === "bajo" ? "Bajo" : "Guitarra"} · {$practiceSession.minutes} min · {$practiceSession.priorityArtist || "Sin artista prioritario"}</p>
+      <p>{$practiceSession.instrument === "bajo" ? "Bajo" : "Guitarra"} · {$practiceSession.minutes} min · {$practiceSession.priorityArtist || "Sin artista prioritario"}{#if $practiceSession.excludedArtists?.length}{" · "}{$practiceSession.excludedArtists.length} {$practiceSession.excludedArtists.length === 1 ? "artista excluido" : "artistas excluidos"}{/if}</p>
       <button class="pill-btn" onclick={changeControls} aria-expanded="false" aria-controls="setlist-controls">Cambiar</button>
     </div>
   {/if}
@@ -172,14 +189,34 @@
             </select>
           </div>
         {/if}
+        {#if instrumentArtists.length}
+          <details class="exclude-control" open={excludedHere.length > 0}>
+            <summary>Excluir artistas{#if excludedHere.length}<span class="count">{excludedHere.length}</span>{/if}</summary>
+            <p class="hint">Sus canciones no entrarán en el setlist. Se recuerda para la próxima vez.</p>
+            <div class="artist-chips" role="group" aria-label="Artistas excluidos del setlist">
+              {#each instrumentArtists as artist (artist)}
+                {@const excluded = isExcluded(artist)}
+                <button type="button" class="artist-chip" class:excluded aria-pressed={excluded} onclick={() => toggleExcluded(artist)}>
+                  <span aria-hidden="true">{excluded ? "✕" : "✓"}</span> {artist}
+                </button>
+              {/each}
+            </div>
+            {#if excludedHere.length}<button type="button" class="link-btn" onclick={clearExcluded}>Volver a incluir a todos</button>{/if}
+          </details>
+        {/if}
         <div class="generate-actions">
           <button type="submit" class="press-btn" disabled={!validMinutes || !candidates.length}>Generar setlist</button>
           {#if $practiceSession}<button type="button" class="pill-btn" onclick={() => (controlsOpen = false)}>Volver a la sesión</button>{/if}
         </div>
         {#if !candidates.length}
           <div class="no-songs" role="status">
-            <p>Aún no tienes canciones de {instrument}.</p>
-            <button type="button" class="pill-btn" onclick={() => onNavigate("repertorio")}>Agregar canciones</button>
+            {#if instrumentSongs.length}
+              <p>Excluiste a todos los artistas con canciones de {instrument}.</p>
+              <button type="button" class="pill-btn" onclick={clearExcluded}>Volver a incluir a todos</button>
+            {:else}
+              <p>Aún no tienes canciones de {instrument}.</p>
+              <button type="button" class="pill-btn" onclick={() => onNavigate("repertorio")}>Agregar canciones</button>
+            {/if}
           </div>
         {/if}
       </form>
@@ -295,6 +332,19 @@
   .presets button { border:1px solid var(--line); padding:8px; }
   input { width:88px; max-width:100%; }
   .artist-control { flex:1; min-width:160px; }
+  .exclude-control { flex-basis:100%; border-top:1px solid var(--line); padding-top:12px; }
+  .exclude-control summary { cursor:pointer; font-size:.8125rem; font-weight:700; min-height:32px; display:flex; align-items:center; gap:8px; }
+  .exclude-control summary { list-style:none; }
+  .exclude-control summary::-webkit-details-marker { display:none; }
+  .exclude-control summary::before { content:"▸"; color:var(--muted); }
+  .exclude-control[open] summary::before { content:"▾"; }
+  .exclude-control .count { min-width:20px; height:20px; padding:0 6px; border-radius:999px; background:var(--coral); color:var(--on-primary); font-size:.6875rem; display:inline-grid; place-items:center; }
+  .exclude-control .hint { margin:4px 0 10px; color:var(--muted); font-size:.8125rem; }
+  .artist-chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .artist-chip { min-height:40px; padding:6px 12px; border:1px solid var(--line); border-radius:999px; background:var(--surface); color:var(--text); font:600 .8125rem "Manrope", sans-serif; cursor:pointer; max-width:100%; overflow-wrap:anywhere; text-align:left; }
+  .artist-chip:hover { border-color:var(--coral); }
+  .artist-chip.excluded { background:var(--surface-muted); color:var(--muted); text-decoration:line-through; border-style:dashed; }
+  .link-btn { margin-top:8px; border:0; background:none; color:var(--coral); font-weight:700; cursor:pointer; text-decoration:underline; padding:4px 0; min-height:32px; }
   select { width:100%; }
   .generate-actions, .done-actions { display:flex; flex-wrap:wrap; gap:8px; }
   .controls-summary { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:24px; padding-bottom:16px; border-bottom:1px solid var(--line); }

@@ -3,6 +3,7 @@ import { songs } from "./stores";
 import { practiceLog, type PracticeEvent } from "./practiceLog";
 import { practiceSession, type PracticeSession } from "./practiceSession";
 import { warmupLog, type WarmupEvent } from "./warmupLog";
+import { excludedArtists } from "./setlistPrefs";
 import { getAudioBlob, getAudioHandle } from "./audioStore";
 import type { Song } from "./types";
 
@@ -22,6 +23,7 @@ interface AppBackup {
   practiceSession: PracticeSession | null;
   /** Opcional: los respaldos anteriores no lo traen. */
   warmupLog?: WarmupEvent[];
+  excludedArtists?: string[];
 }
 
 export interface ImportSummary {
@@ -52,6 +54,7 @@ export async function createBackup(): Promise<AppBackup> {
     practiceLog: get(practiceLog),
     practiceSession: get(practiceSession),
     warmupLog: get(warmupLog),
+    excludedArtists: get(excludedArtists),
   };
 }
 
@@ -102,4 +105,5 @@ export function restoreBackup(backup: AppBackup): void {
   practiceLog.set(backup.practiceLog);
   practiceSession.set(backup.practiceSession ?? null);
   if (Array.isArray(backup.warmupLog)) warmupLog.set(backup.warmupLog);
+  if (Array.isArray(backup.excludedArtists)) excludedArtists.set(backup.excludedArtists.filter((a) => typeof a === "string"));
 }

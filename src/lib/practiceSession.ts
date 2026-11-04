@@ -6,6 +6,8 @@ export interface PracticeSession {
   minutes: number;
   /** Opcional: las sesiones anteriores siguen cargando sin este campo. */
   priorityArtist?: string;
+  /** Opcional: artistas retirados al generar este setlist. */
+  excludedArtists?: string[];
   songIds: string[];
   currentIndex: number;
   practicedIds: string[];
