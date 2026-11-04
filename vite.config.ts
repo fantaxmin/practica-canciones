@@ -3,5 +3,7 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: process.env.VITE_BASE ?? "/",
+  server: { port: 5173, strictPort: true },
   plugins: [svelte()],
 })

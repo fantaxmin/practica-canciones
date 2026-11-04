@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isTauri, openExternal } from "../lib/platform";
   import { getAudioBlob, getAudioHandle } from "../lib/audioStore";
   import { driveEmbedUrl, driveViewUrl, extractDriveLink, isFirefox } from "../lib/drive";
 
@@ -32,7 +33,11 @@
     return () => clearTimeout(timer);
   });
 
-  function openDriveWindow() {
+  async function openDriveWindow() {
+    if (isTauri()) {
+      await openExternal(previewUrl);
+      return;
+    }
     const popup = window.open(previewUrl, "drive-player", "popup,width=520,height=260,noopener");
     // noopener también puede devolver null cuando la ventana sí se abrió.
     // El respaldo explícito evita abrir dos ventanas en ese caso.

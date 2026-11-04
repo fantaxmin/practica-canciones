@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
+  import { openExternal } from "../lib/platform";
   import { parseMmSs } from "../lib/duration";
 
   let { videoId, title }: { videoId: string; title: string } = $props();
@@ -86,6 +87,9 @@
 <div class="video-player">
   <div class="frame" aria-label={title}>
     <div id={elementId}></div>
+  </div>
+  <div>
+    <button type="button" class="pill-btn small" onclick={() => openExternal(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`)}>Abrir en YouTube</button>
   </div>
   <div class="loop-row">
     <input
