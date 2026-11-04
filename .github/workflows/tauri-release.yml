@@ -1,0 +1,51 @@
+name: Publicar app de escritorio
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tauri-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            args: --bundles appimage,rpm,deb
+          - platform: windows-latest
+            args: --bundles msi,nsis
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Instalar dependencias de Linux
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libwebkit2gtk-4.1-dev libssl-dev curl wget file libayatana-appindicator3-dev librsvg2-dev patchelf rpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_BASE: /
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
+          releaseName: Práctica de canciones __VERSION__
+          releaseBody: Descarga el instalador de tu sistema desde los archivos adjuntos.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}

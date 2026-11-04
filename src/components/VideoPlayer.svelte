@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
+  import { openExternal } from "../lib/platform";
   import { parseMmSs } from "../lib/duration";
 
   let { videoId, title }: { videoId: string; title: string } = $props();
@@ -87,6 +88,9 @@
   <div class="frame" aria-label={title}>
     <div id={elementId}></div>
   </div>
+  <div>
+    <button type="button" class="pill-btn" onclick={() => openExternal(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`)}>Abrir en YouTube</button>
+  </div>
   <div class="loop-row">
     <input
       type="text"
@@ -102,7 +106,7 @@
       class="loop-input"
       disabled={loopEnabled}
     />
-    <button class="pill-btn small" class:active={loopEnabled} onclick={toggleLoop}>
+    <button class="pill-btn" class:active={loopEnabled} onclick={toggleLoop}>
       {loopEnabled ? "Detener loop" : "Loop"}
     </button>
   </div>
