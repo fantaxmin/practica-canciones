@@ -1,7 +1,7 @@
 import { writable } from "svelte/store";
 import type { Notation } from "./theory/notes";
 
-export type WarmupKind = "quiz" | "rutina" | "oido";
+export type WarmupKind = "quiz" | "rutina" | "oido" | "groove" | "notas" | "lineas";
 
 export interface WarmupEvent {
   id: string;
