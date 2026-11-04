@@ -56,3 +56,8 @@ export function stopAll(): void {
   }
   active.clear();
 }
+
+/** Contexto compartido; llamar únicamente después de una interacción del usuario. */
+export function audioContext(): AudioContext {
+  return audio().ctx;
+}
