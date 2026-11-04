@@ -9,18 +9,20 @@
   import WarmupRoutine from "./WarmupRoutine.svelte";
   import MiniQuiz from "./MiniQuiz.svelte";
   import EarTraining from "../EarTraining.svelte";
+  import NoteFinder from "./NoteFinder.svelte";
 
-  type View = "rutina" | "explorar" | "teoria" | "quiz" | "oido";
+  type View = "rutina" | "explorar" | "teoria" | "quiz" | "oido" | "notas";
   const VIEWS: { id: View; label: string }[] = [
     { id: "rutina", label: "Rutina" },
     { id: "explorar", label: "Explorar escalas" },
     { id: "teoria", label: "Teoría" },
     { id: "quiz", label: "Quiz" },
     { id: "oido", label: "Oído" },
+    { id: "notas", label: "Encontrar notas" },
   ];
 
   let view = $state<View>("rutina");
-  let instrument = $state<Instrument>($practiceSession?.instrument ?? "guitarra");
+  let instrument = $state<Instrument>($practiceSession?.instrument ?? "bajo");
   let root = $state<SpelledNote>({ letter: 0, accidental: 0 });
   let scaleId = $state<ScaleId>("jonico");
 
@@ -62,8 +64,10 @@
       <TheoryCards onExplore={explore} />
     {:else if view === "quiz"}
       <MiniQuiz />
-    {:else}
+    {:else if view === "oido"}
       <EarTraining />
+    {:else}
+      <NoteFinder bind:instrument />
     {/if}
   </div>
 </div>
