@@ -13,10 +13,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  # Crea (o reutiliza) un único borrador de release antes de compilar, para que
+  # las plataformas en paralelo no creen borradores duplicados.
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.release.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { version } = require('./package.json');
+            const tag = context.ref.startsWith('refs/tags/') ? context.ref.replace('refs/tags/', '') : `v${version}`;
+            const releases = await github.paginate(github.rest.repos.listReleases, { ...context.repo, per_page: 100 });
+            const existing = releases.find((r) => r.tag_name === tag);
+            if (existing) return existing.id;
+            const { data } = await github.rest.repos.createRelease({
+              ...context.repo,
+              tag_name: tag,
+              target_commitish: context.sha,
+              name: `Práctica de canciones ${version}`,
+              body: 'Descarga el instalador de tu sistema desde los archivos adjuntos.',
+              draft: true,
+              prerelease: false,
+            });
+            return data.id;
+
+  build:
+    needs: create-release
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         include:
           - platform: ubuntu-22.04
@@ -31,6 +59,9 @@ jobs:
           node-version: 24
       - uses: pnpm/action-setup@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
       - name: Instalar dependencias de Linux
         if: matrix.platform == 'ubuntu-22.04'
         run: |
@@ -43,9 +74,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_BASE: /
         with:
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
-          releaseName: Práctica de canciones __VERSION__
-          releaseBody: Descarga el instalador de tu sistema desde los archivos adjuntos.
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
