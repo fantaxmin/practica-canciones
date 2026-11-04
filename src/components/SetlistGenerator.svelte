@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import type { Instrument, Song } from "../lib/types";
+  import type { Instrument, Song, Tab } from "../lib/types";
   import { formatMmSs } from "../lib/duration";
   import { daysSince } from "../lib/freshness";
   import { generateSetlist } from "../lib/setlist";
@@ -10,8 +10,9 @@
   import { practiceSession } from "../lib/practiceSession";
   import VideoPlayer from "./VideoPlayer.svelte";
   import AudioPlayer from "./AudioPlayer.svelte";
+  import WarmupRoutine from "./warmup/WarmupRoutine.svelte";
 
-  let { onNavigate }: { onNavigate: (tab: "repertorio" | "setlist" | "stats") => void } = $props();
+  let { onNavigate }: { onNavigate: (tab: Tab) => void } = $props();
   let instrument = $state<Instrument>($practiceSession?.instrument ?? "bajo");
   let minutes = $state<number | undefined>($practiceSession?.minutes ?? 15);
   let priorityArtist = $state($practiceSession?.priorityArtist ?? "");
@@ -67,7 +68,7 @@
   function generate() {
     if (!validMinutes || !candidates.length || minutes === undefined) return;
     const result = generateSetlist($songs, instrument, minutes * 60, priorityArtist || undefined);
-    practiceSession.set({ instrument, minutes, priorityArtist, songIds: result.map((song) => song.id), currentIndex: 0, practicedIds: [] });
+    practiceSession.set({ instrument, minutes, priorityArtist, songIds: result.map((song) => song.id), currentIndex: 0, practicedIds: [], warmup: result.length ? "pending" : undefined });
     controlsOpen = false;
     media = null;
     void focusCurrent();
@@ -93,6 +94,12 @@
       currentIndex: session.currentIndex + 1,
       practicedIds: [...new Set([...session.practicedIds, song.id])],
     } : session);
+    void focusCurrent();
+  }
+
+  function setWarmup(state: "done" | "skipped") {
+    practiceSession.update((session) => session ? { ...session, warmup: state } : session);
+    window.scrollTo({ top: 0 });
     void focusCurrent();
   }
 
@@ -191,6 +198,8 @@
           <button class="pill-btn" onclick={() => onNavigate("repertorio")}>Ir a Mi repertorio</button>
         </div>
       </div>
+    {:else if $practiceSession.warmup === "pending"}
+      <WarmupRoutine instrument={$practiceSession.instrument} embedded onFinish={() => setWarmup("done")} onSkip={() => setWarmup("skipped")} />
     {:else}
       <div class="session-progress">
         <p class="announcement" aria-live="polite" aria-atomic="true">{sessionDone ? "Sesión completa" : `Canción ${currentIndex + 1} de ${sessionSongs.length}: ${currentSong?.title}`}</p>

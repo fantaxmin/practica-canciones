@@ -12,3 +12,5 @@ export interface Song {
 }
 
 export type Instrument = "bajo" | "guitarra";
+
+export type Tab = "repertorio" | "setlist" | "calentamiento" | "stats";

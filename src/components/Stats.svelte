@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import type { Tab } from "../lib/types";
   import { practiceLog } from "../lib/practiceLog";
   import { songs } from "../lib/stores";
   import { daysSince } from "../lib/freshness";
   import { computeStreak, totalPracticeSeconds, topSongs, formatDuration, dailyMinutes, staleSongs } from "../lib/stats";
 
-  let { onNavigate }: { onNavigate: (tab: "repertorio" | "setlist" | "stats") => void } = $props();
+  let { onNavigate }: { onNavigate: (tab: Tab) => void } = $props();
   let now = $state(Date.now());
   const streak = $derived.by(() => { now; return computeStreak($practiceLog); });
   const totalSeconds = $derived(totalPracticeSeconds($practiceLog));

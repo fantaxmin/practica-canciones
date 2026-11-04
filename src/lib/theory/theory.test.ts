@@ -140,3 +140,17 @@ describe("quiz", () => {
     expect(quiz.length).toBe(5);
   });
 });
+
+describe("rutina", async () => {
+  const { buildRoutine, ROUTINE_KEYS } = await import("./routine");
+  it("4 pasos coherentes con la tonalidad", () => {
+    for (const key of ROUTINE_KEYS) {
+      const steps = buildRoutine(key, seededRng(3));
+      expect(steps.map((s) => s.scaleId).slice(0, 2)).toEqual(["jonico", "eolico"]);
+      expect(pitchClass(steps[1].root)).toBe(pitchClass(relativeMinor(key)));
+      const keyPcs = new Set(buildScale(key, "jonico").map(pitchClass));
+      expect(buildScale(steps[2].root, steps[2].scaleId).every((x) => keyPcs.has(pitchClass(x)))).toBe(true);
+      expect(steps[3].scaleId).toBe("pentaMenor");
+    }
+  });
+});

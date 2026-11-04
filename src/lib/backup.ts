@@ -2,6 +2,7 @@ import { get } from "svelte/store";
 import { songs } from "./stores";
 import { practiceLog, type PracticeEvent } from "./practiceLog";
 import { practiceSession, type PracticeSession } from "./practiceSession";
+import { warmupLog, type WarmupEvent } from "./warmupLog";
 import { getAudioBlob, getAudioHandle } from "./audioStore";
 import type { Song } from "./types";
 
@@ -19,6 +20,8 @@ interface AppBackup {
   songs: SongBackup[];
   practiceLog: PracticeEvent[];
   practiceSession: PracticeSession | null;
+  /** Opcional: los respaldos anteriores no lo traen. */
+  warmupLog?: WarmupEvent[];
 }
 
 export interface ImportSummary {
@@ -48,6 +51,7 @@ export async function createBackup(): Promise<AppBackup> {
     songs: songBackups,
     practiceLog: get(practiceLog),
     practiceSession: get(practiceSession),
+    warmupLog: get(warmupLog),
   };
 }
 
@@ -97,4 +101,5 @@ export function restoreBackup(backup: AppBackup): void {
   songs.set(backup.songs.map(({ localAudioFileName: _name, ...song }) => ({ ...song, driveUrl: song.driveUrl ?? "", audioFileId: null })));
   practiceLog.set(backup.practiceLog);
   practiceSession.set(backup.practiceSession ?? null);
+  if (Array.isArray(backup.warmupLog)) warmupLog.set(backup.warmupLog);
 }

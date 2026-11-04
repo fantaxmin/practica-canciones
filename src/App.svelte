@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { slide } from "svelte/transition";
-  import type { Song } from "./lib/types";
+  import type { Song, Tab } from "./lib/types";
   import { songs } from "./lib/stores";
   import { darkMode } from "./lib/theme";
   import SongForm from "./components/SongForm.svelte";
@@ -9,8 +9,9 @@
   import SetlistGenerator from "./components/SetlistGenerator.svelte";
   import Stats from "./components/Stats.svelte";
   import DataManager from "./components/DataManager.svelte";
+  import Warmup from "./components/warmup/Warmup.svelte";
 
-  let tab = $state<"repertorio" | "setlist" | "stats">("repertorio");
+  let tab = $state<Tab>("repertorio");
 
   let formOpen = $state($songs.length === 0);
   let addButton = $state<HTMLButtonElement>();
@@ -29,7 +30,7 @@
     return () => media.removeEventListener("change", sync);
   });
 
-  function navigate(nextTab: "repertorio" | "setlist" | "stats") {
+  function navigate(nextTab: Tab) {
     tab = nextTab;
     void tick().then(() => document.querySelector<HTMLElement>("main h2")?.focus());
   }
@@ -103,6 +104,9 @@
     <button class="pill-btn" class:active={tab === "setlist"} onclick={() => (tab = "setlist")}>
       <span class="wide-tab">Generar setlist</span><span class="short-tab">Setlist</span>
     </button>
+    <button class="pill-btn" class:active={tab === "calentamiento"} onclick={() => (tab = "calentamiento")}>
+      <span class="wide-tab">Calentamiento</span><span class="short-tab">Calentar</span>
+    </button>
     <button class="pill-btn" class:active={tab === "stats"} onclick={() => (tab = "stats")}>
       Estadísticas
     </button>
@@ -133,6 +137,10 @@
   {:else if tab === "setlist"}
     <section>
       <SetlistGenerator onNavigate={navigate} />
+    </section>
+  {:else if tab === "calentamiento"}
+    <section>
+      <Warmup />
     </section>
   {:else}
     <section>

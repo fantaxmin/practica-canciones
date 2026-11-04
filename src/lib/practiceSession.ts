@@ -9,6 +9,8 @@ export interface PracticeSession {
   songIds: string[];
   currentIndex: number;
   practicedIds: string[];
+  /** Opcional: calentamiento antes de la primera canción. */
+  warmup?: "pending" | "done" | "skipped";
 }
 
 const STORAGE_KEY = "practica-canciones:practice-session";

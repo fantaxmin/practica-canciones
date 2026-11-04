@@ -135,6 +135,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   color: var(--on-primary);
 }
 
+/* Selector segmentado (bajo/guitarra, notas/grados…) */
+.segmented { display:inline-flex; border:1px solid var(--line); border-radius:999px; padding:3px; gap:2px; background:var(--surface); }
+.segmented button { border:0; background:transparent; color:var(--text); border-radius:999px; min-height:38px; padding:6px 14px; font:700 12px "Bricolage Grotesque", sans-serif; cursor:pointer; }
+.segmented button.active { background:var(--coral); color:var(--on-primary); }
+
 .icon-btn {
   width: 44px;
   height: 44px;
