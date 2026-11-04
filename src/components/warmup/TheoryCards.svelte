@@ -119,7 +119,7 @@
   a:hover .minor, a:focus-visible .minor { fill:var(--coral); }
   .center { font:500 10px "Manrope", sans-serif; fill:var(--muted); text-anchor:middle; }
   .table-wrap { overflow-x:auto; }
-  table { width:100%; border-collapse:collapse; font-size:.875rem; }
+  table { width:100%; min-width:540px; border-collapse:collapse; font-size:.875rem; }
   th, td { text-align:left; padding:8px; border-bottom:1px solid var(--line); vertical-align:top; }
   thead th { font-size:.75rem; color:var(--muted); }
   .mono { font-family:"JetBrains Mono", monospace; font-size:.8rem; }

@@ -13,7 +13,7 @@
     maxFret?: number;
   } = $props();
 
-  const NUT_X = 44;
+  const NUT_X = 68;
   const FRET_W = 52;
   const GAP = 28;
   const TOP = 22;
@@ -25,7 +25,7 @@
   const positions = $derived(scalePositions(tuning, root, scaleId, maxFret));
   // La cuerda más aguda arriba, como en una tablatura.
   const stringY = (string: number) => TOP + (strings - 1 - string) * GAP;
-  const fretX = (fret: number) => fret === 0 ? NUT_X / 2 : NUT_X + (fret - 0.5) * FRET_W;
+  const fretX = (fret: number) => fret === 0 ? NUT_X - 20 : NUT_X + (fret - 0.5) * FRET_W;
   const openNames = $derived(tuning.strings.map((midi) => {
     const note = ROOTS.find((r) => pitchClass(r) === midi % 12);
     return note ? noteName(note, notation) : "";

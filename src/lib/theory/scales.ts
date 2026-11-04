@@ -62,7 +62,7 @@ export const SCALES: ScaleDef[] = [
     id: "eolico", name: "Eólico", alias: "Menor natural", family: "modo", majorDegree: 6,
     formula: ["1", "2", "b3", "4", "5", "b6", "b7"],
     mood: "Triste, épico, la menor por defecto.",
-    description: "La menor natural. Empieza en el 6º grado de la mayor; por eso La menor es la relativa de Do mayor.",
+    description: "Es la escala menor natural. Empieza en el 6º grado de la mayor; por eso La menor es la relativa de Do mayor.",
     useOver: ["Acorde m7 que es el vi o el i de una tonalidad menor", "Baladas y rock en menor"],
   },
   {

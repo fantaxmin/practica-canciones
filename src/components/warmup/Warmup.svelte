@@ -8,13 +8,15 @@
   import TheoryCards from "./TheoryCards.svelte";
   import WarmupRoutine from "./WarmupRoutine.svelte";
   import MiniQuiz from "./MiniQuiz.svelte";
+  import EarTraining from "../EarTraining.svelte";
 
-  type View = "rutina" | "explorar" | "teoria" | "quiz";
+  type View = "rutina" | "explorar" | "teoria" | "quiz" | "oido";
   const VIEWS: { id: View; label: string }[] = [
     { id: "rutina", label: "Rutina" },
     { id: "explorar", label: "Explorar escalas" },
     { id: "teoria", label: "Teoría" },
     { id: "quiz", label: "Quiz" },
+    { id: "oido", label: "Oído" },
   ];
 
   let view = $state<View>("rutina");
@@ -58,8 +60,10 @@
       <div class="card pad"><ScaleExplorer bind:root bind:scaleId bind:instrument /></div>
     {:else if view === "teoria"}
       <TheoryCards onExplore={explore} />
-    {:else}
+    {:else if view === "quiz"}
       <MiniQuiz />
+    {:else}
+      <EarTraining />
     {/if}
   </div>
 </div>
@@ -73,5 +77,5 @@
   .stat { font-weight:700; }
   .subnav { display:flex; gap:8px; flex-wrap:wrap; }
   .pad { padding:20px; min-width:0; }
-  @media (max-width:640px) { .subnav { gap:4px; } .subnav button { flex:1 1 auto; padding:8px 10px; } .pad { padding:14px; } }
+  @media (max-width:640px) { .subnav { gap:4px; flex-wrap:nowrap; overflow-x:auto; margin:0 -16px; padding:0 16px 4px; scrollbar-width:none; } .subnav button { flex:0 0 auto; padding:8px 12px; } .pad { padding:14px; } }
 </style>
