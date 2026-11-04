@@ -45,9 +45,10 @@ export function playSequence(midis: number[], bpm = 120): number {
   return midis.length * step;
 }
 
-export function playChord(midis: number[], duration = 1.4): void {
-  const volume = 0.6 / Math.sqrt(Math.max(1, midis.length));
-  midis.forEach((midi) => playNote(midi, duration, 0, volume));
+/** Acorde programable; volumen total por defecto compatible con las llamadas existentes. */
+export function playChord(midis: number[], duration = 1.4, volume = 0.6, start = 0): void {
+  const noteVolume = volume / Math.sqrt(Math.max(1, midis.length));
+  midis.forEach((midi) => playNote(midi, duration, start, noteVolume));
 }
 
 export function stopAll(): void {
