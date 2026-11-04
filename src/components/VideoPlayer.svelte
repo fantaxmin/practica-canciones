@@ -89,7 +89,7 @@
     <div id={elementId}></div>
   </div>
   <div>
-    <button type="button" class="pill-btn small" onclick={() => openExternal(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`)}>Abrir en YouTube</button>
+    <button type="button" class="pill-btn" onclick={() => openExternal(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`)}>Abrir en YouTube</button>
   </div>
   <div class="loop-row">
     <input
@@ -106,7 +106,7 @@
       class="loop-input"
       disabled={loopEnabled}
     />
-    <button class="pill-btn small" class:active={loopEnabled} onclick={toggleLoop}>
+    <button class="pill-btn" class:active={loopEnabled} onclick={toggleLoop}>
       {loopEnabled ? "Detener loop" : "Loop"}
     </button>
   </div>
