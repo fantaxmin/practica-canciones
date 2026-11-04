@@ -1,7 +1,7 @@
 {
   "name": "practica-canciones",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.2.0",
   "packageManager": "pnpm@11.22.0",
   "type": "module",
   "scripts": {
