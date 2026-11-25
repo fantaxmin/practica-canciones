@@ -1,15 +1,24 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import type { Tab } from "../lib/types";
   import { practiceLog } from "../lib/practiceLog";
   import { songs } from "../lib/stores";
   import { daysSince } from "../lib/freshness";
   import { computeStreak, totalPracticeSeconds, topSongs, formatDuration, dailyMinutes, staleSongs } from "../lib/stats";
+  import { MOTION, countUp, createAnimationGroup, gsap, reducedMotion } from "../lib/motion";
 
   let { onNavigate }: { onNavigate: (tab: Tab) => void } = $props();
   let now = $state(Date.now());
+  let statsEl = $state<HTMLDivElement>();
+  let streakEl = $state<HTMLSpanElement>();
+  let totalEl = $state<HTMLSpanElement>();
+  let countEl = $state<HTMLSpanElement>();
+  let animated = false;
+
   const streak = $derived.by(() => { now; return computeStreak($practiceLog); });
   const totalSeconds = $derived(totalPracticeSeconds($practiceLog));
+  const totalFormatted = $derived(formatDuration(totalSeconds));
+  const practiceCount = $derived($practiceLog.length);
   const top = $derived(topSongs($practiceLog, 5));
   const activity = $derived(dailyMinutes($practiceLog, 14, now));
   const maxMinutes = $derived(Math.max(1, ...activity.map((day) => day.minutes)));
@@ -17,13 +26,115 @@
   const dateLabel = (at: number) => new Date(at).toLocaleDateString("es", { day: "numeric", month: "short" });
   const minuteLabel = (minutes: number) => `${minutes.toLocaleString("es", { maximumFractionDigits: 1 })} min`;
 
+  const entranceGroup = createAnimationGroup();
+
   onMount(() => {
+    let destroyed = false;
     const clock = setInterval(() => { now = Date.now(); }, 60_000);
-    return () => clearInterval(clock);
+
+    if ($practiceLog.length > 0) {
+      animated = true;
+      void tick().then(() => {
+        if (destroyed) return;
+        if (streakEl) {
+          entranceGroup.add(
+            countUp(streakEl, streak, {
+              duration: MOTION.duration.count,
+              format: (n) => String(Math.round(n)),
+            })
+          );
+        }
+        if (totalEl) {
+          entranceGroup.add(
+            countUp(totalEl, totalSeconds, {
+              duration: MOTION.duration.count,
+              format: (n) => formatDuration(Math.round(n)),
+            })
+          );
+        }
+        if (countEl) {
+          entranceGroup.add(
+            countUp(countEl, practiceCount, {
+              duration: MOTION.duration.count,
+              format: (n) => String(Math.round(n)),
+            })
+          );
+        }
+
+        if (!$reducedMotion && statsEl) {
+          const bars = Array.from(
+            statsEl.querySelectorAll<SVGRectElement>(".activity-bar[data-nonzero='true']")
+          );
+          if (bars.length) {
+            const maxStagger = 12;
+            const immediate = bars.length > maxStagger ? bars.slice(0, bars.length - maxStagger) : [];
+            const staggered = bars.length > maxStagger ? bars.slice(bars.length - maxStagger) : bars;
+            if (immediate.length) {
+              entranceGroup.add(
+                gsap.fromTo(
+                  immediate,
+                  { scaleY: 0, svgOrigin: "0 140" },
+                  {
+                    scaleY: 1,
+                    svgOrigin: "0 140",
+                    duration: MOTION.duration.count * 0.75,
+                    ease: MOTION.ease.out,
+                    clearProps: "transform,transformOrigin",
+                  }
+                )
+              );
+            }
+            entranceGroup.add(
+              gsap.fromTo(
+                staggered,
+                { scaleY: 0, svgOrigin: "0 140" },
+                {
+                  scaleY: 1,
+                  svgOrigin: "0 140",
+                  duration: MOTION.duration.count * 0.75,
+                  stagger: MOTION.duration.staggerList,
+                  ease: MOTION.ease.out,
+                  clearProps: "transform,transformOrigin",
+                }
+              )
+            );
+          }
+        }
+      });
+    }
+
+    return () => {
+      destroyed = true;
+      clearInterval(clock);
+      entranceGroup.killAll();
+    };
+  });
+
+  // Mantener sincronizados los valores visibles si cambian tras la entrada (sin reanimar).
+  let prevValues: [number, number, number] | null = null;
+  $effect(() => {
+    const next: [number, number, number] = [streak, totalSeconds, practiceCount];
+    if (prevValues === null) {
+      prevValues = next;
+      return;
+    }
+    if (
+      next[0] === prevValues[0] &&
+      next[1] === prevValues[1] &&
+      next[2] === prevValues[2]
+    ) {
+      return;
+    }
+    prevValues = next;
+    if (!animated) return;
+    entranceGroup.finishAll();
+    if (streakEl) streakEl.textContent = String(streak);
+    if (totalEl) totalEl.textContent = totalFormatted;
+    if (countEl) countEl.textContent = String(practiceCount);
   });
 </script>
 
-<div class="stats">
+<div class="stats" bind:this={statsEl}>
   <h2 tabindex="-1">Estadísticas</h2>
   {#if !$practiceLog.length}
     <div class="empty">
@@ -34,9 +145,27 @@
     </div>
   {:else}
     <dl class="stat-grid">
-      <div class="stat-card"><dt>{streak === 1 ? "día seguido" : "días seguidos"}</dt><dd>{streak}</dd></div>
-      <div class="stat-card"><dt>tiempo total</dt><dd>{formatDuration(totalSeconds)}</dd></div>
-      <div class="stat-card"><dt>{$practiceLog.length === 1 ? "práctica marcada" : "prácticas marcadas"}</dt><dd>{$practiceLog.length}</dd></div>
+      <div class="stat-card">
+        <dt>{streak === 1 ? "día seguido" : "días seguidos"}</dt>
+        <dd>
+          <span class="sr-only">{streak}</span>
+          <span aria-hidden="true" bind:this={streakEl}>{streak}</span>
+        </dd>
+      </div>
+      <div class="stat-card">
+        <dt>tiempo total</dt>
+        <dd>
+          <span class="sr-only">{totalFormatted}</span>
+          <span aria-hidden="true" bind:this={totalEl}>{totalFormatted}</span>
+        </dd>
+      </div>
+      <div class="stat-card">
+        <dt>{practiceCount === 1 ? "práctica marcada" : "prácticas marcadas"}</dt>
+        <dd>
+          <span class="sr-only">{practiceCount}</span>
+          <span aria-hidden="true" bind:this={countEl}>{practiceCount}</span>
+        </dd>
+      </div>
     </dl>
 
     <section class="activity-section" aria-labelledby="activity-title">
@@ -49,7 +178,16 @@
           {@const height = (day.minutes / maxMinutes) * 120}
           <g role="img" aria-label={`${index === 13 ? "Hoy" : dateLabel(day.at)}: ${minuteLabel(day.minutes)}`}>
             <title>{dateLabel(day.at)}: {minuteLabel(day.minutes)}</title>
-            <rect x={index * 40 + 9} y={140 - height} width="22" height={Math.max(0, height)} rx="3" fill={index === 13 ? "var(--primary)" : "color-mix(in srgb, var(--accent) 70%, var(--text))"} />
+            <rect
+              class="activity-bar"
+              data-nonzero={height > 0 ? "true" : "false"}
+              x={index * 40 + 9}
+              y={140 - height}
+              width="22"
+              height={Math.max(0, height)}
+              rx="3"
+              fill={index === 13 ? "var(--primary)" : "color-mix(in srgb, var(--accent) 70%, var(--text))"}
+            />
             <text x={index * 40 + 20} y="157" text-anchor="middle" aria-hidden="true">{index === 13 ? "Hoy" : new Date(day.at).getDate()}</text>
           </g>
         {/each}
