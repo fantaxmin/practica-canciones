@@ -4,6 +4,8 @@
   import { noteName, rootKey, type SpelledNote } from "../../lib/theory/notes";
   import { ROUTINE_KEYS, buildRoutine, type RoutineStep } from "../../lib/theory/routine";
   import { logWarmup, notation } from "../../lib/warmupLog";
+  import { MOTION, createAnimationGroup, gsap, reducedMotion } from "../../lib/motion";
+  import { stepReveal } from "../../lib/feedbackMotion";
   import ScaleExplorer from "./ScaleExplorer.svelte";
   import MiniQuiz from "./MiniQuiz.svelte";
 
@@ -25,9 +27,67 @@
   let running = $state(false);
   let timer: ReturnType<typeof setInterval> | undefined;
   let heading = $state<HTMLElement>();
+  let stepBodyEl = $state<HTMLDivElement>();
+  let dotsEl = $state<HTMLOListElement>();
+  let phaseEl = $state<HTMLDivElement>();
+
+  const transitionGroup = createAnimationGroup();
+  let lastPhase: typeof phase = "intro";
+  let lastStepIndex = -1;
 
   const step = $derived(steps[index]);
   const n = $derived($notation);
+
+  $effect(() => {
+    const currentPhase = phase;
+    const currentIndex = index;
+
+    if (currentPhase === "steps" && lastPhase === "steps" && currentIndex !== lastStepIndex) {
+      lastStepIndex = currentIndex;
+      transitionGroup.finishAll();
+      if ($reducedMotion) return;
+
+      let cancelled = false;
+      void tick().then(() => {
+        if (cancelled || $reducedMotion) return;
+        transitionGroup.add(stepReveal(stepBodyEl, { x: 12, y: 0 }));
+        const activeDot = dotsEl?.querySelector<HTMLElement>(`li[data-step="${currentIndex}"] .dot-fill`);
+        if (activeDot) {
+          transitionGroup.add(
+            gsap.fromTo(
+              activeDot,
+              { scaleX: 0 },
+              {
+                scaleX: 1,
+                duration: MOTION.duration.indicator,
+                ease: MOTION.ease.out,
+                clearProps: "transform",
+              }
+            )
+          );
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (currentPhase !== lastPhase) {
+      lastPhase = currentPhase;
+      lastStepIndex = currentPhase === "steps" ? currentIndex : -1;
+      transitionGroup.finishAll();
+      if ($reducedMotion) return;
+
+      let cancelled = false;
+      void tick().then(() => {
+        if (cancelled || $reducedMotion) return;
+        transitionGroup.add(stepReveal(phaseEl, { y: 8 }));
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+  });
 
   async function focusHeading() {
     await tick();
@@ -84,14 +144,17 @@
     void focusHeading();
   }
 
-  onDestroy(stopTimer);
+  onDestroy(() => {
+    stopTimer();
+    transitionGroup.killAll();
+  });
 
   const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 </script>
 
 <div class="routine">
   {#if phase === "intro"}
-    <div class="card intro">
+    <div class="card intro" bind:this={phaseEl}>
       <h3 bind:this={heading} tabindex="-1">{embedded ? "Antes de empezar: calentamiento" : "Rutina de calentamiento"}</h3>
       <p>4 escalas alrededor de una tonalidad (mayor, su relativa menor, un modo y la pentatónica) y al final un mini quiz de 5 preguntas. Unos {Math.round((stepSeconds * 4) / 60 + 2)} minutos.</p>
       <div class="options">
@@ -124,7 +187,7 @@
       </div>
     </div>
   {:else if phase === "steps" && step}
-    <div class="card step-card">
+    <div class="card step-card" bind:this={phaseEl}>
       <div class="step-head">
         <div>
           <p class="eyebrow">Escala {index + 1} de {steps.length}</p>
@@ -135,20 +198,30 @@
           <button type="button" class="pill-btn" onclick={() => (running ? stopTimer() : startTimer())}>{running ? "Pausa" : remaining === 0 ? "Otra vez" : "Seguir"}</button>
         </div>
       </div>
-      <ol class="dots" aria-hidden="true">{#each steps as _, i (i)}<li class:done={i < index} class:current={i === index}></li>{/each}</ol>
-      <p class="instruction">{step.instruction}</p>
-      <ScaleExplorer root={step.root} scaleId={step.scaleId} {instrument} compact />
+      <ol class="dots" bind:this={dotsEl} aria-hidden="true">
+        {#each steps as _, i (i)}
+          <li data-step={i} class:done={i < index} class:current={i === index}>
+            <span class="dot-fill"></span>
+          </li>
+        {/each}
+      </ol>
+      <div class="step-body" bind:this={stepBodyEl}>
+        <p class="instruction">{step.instruction}</p>
+        <ScaleExplorer root={step.root} scaleId={step.scaleId} {instrument} compact />
+      </div>
       <div class="actions">
         <button type="button" class="press-btn" onclick={next}>{index + 1 < steps.length ? "Siguiente escala" : "Ir al quiz"}</button>
         {#if embedded}<button type="button" class="pill-btn" onclick={() => { stopTimer(); onSkip?.(); }}>Saltar calentamiento</button>{/if}
       </div>
     </div>
   {:else if phase === "quiz"}
-    <h3 bind:this={heading} tabindex="-1" class="quiz-title">Mini quiz</h3>
-    <MiniQuiz onDone={finishQuiz} />
-    {#if embedded}<button type="button" class="pill-btn skip-quiz" onclick={() => onFinish?.()}>Saltar quiz e ir a las canciones</button>{/if}
+    <div class="phase-wrap" bind:this={phaseEl}>
+      <h3 bind:this={heading} tabindex="-1" class="quiz-title">Mini quiz</h3>
+      <MiniQuiz onDone={finishQuiz} />
+      {#if embedded}<button type="button" class="pill-btn skip-quiz" onclick={() => onFinish?.()}>Saltar quiz e ir a las canciones</button>{/if}
+    </div>
   {:else}
-    <div class="card intro">
+    <div class="card intro" bind:this={phaseEl}>
       <h3 bind:this={heading} tabindex="-1">Calentamiento terminado</h3>
       <p>Buen trabajo. {embedded ? "Ahora sí, a las canciones." : "Puedes repetir con otra tonalidad o explorar las escalas a tu ritmo."}</p>
       <div class="actions">
@@ -164,7 +237,9 @@
 
 <style>
   .routine { display:grid; gap:16px; }
+  .phase-wrap { display:grid; gap:16px; min-width:0; }
   .card { padding:20px; display:grid; gap:14px; min-width:0; }
+  .step-body { display:grid; gap:14px; min-width:0; }
   h3 { margin:0; font:700 1.25rem "Bricolage Grotesque", sans-serif; }
   h3:focus { outline:none; }
   p { margin:0; }
@@ -177,9 +252,10 @@
   .timer span { font:600 1.5rem "JetBrains Mono", monospace; min-width:5ch; text-align:right; }
   .timer.over span { color:var(--coral); font-size:1.1rem; }
   .dots { display:flex; gap:6px; list-style:none; padding:0; margin:0; }
-  .dots li { flex:1; height:6px; border-radius:3px; background:var(--line); }
-  .dots li.done { background:var(--lime); }
-  .dots li.current { background:var(--coral); }
+  .dots li { flex:1; height:6px; border-radius:3px; background:var(--line); overflow:hidden; }
+  .dot-fill { display:block; width:100%; height:100%; transform-origin:left center; transform:scaleX(0); }
+  .dots li.done .dot-fill { background:var(--lime); transform:scaleX(1); }
+  .dots li.current .dot-fill { background:var(--coral); transform:scaleX(1); }
   .instruction { padding:12px 14px; background:var(--surface-muted); border-radius:var(--radius-sm); }
   .quiz-title { margin-bottom:-4px; }
   .skip-quiz { justify-self:start; }

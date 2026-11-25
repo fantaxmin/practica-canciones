@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { tick, untrack } from "svelte";
+  import { onDestroy, tick, untrack } from "svelte";
   import { generateQuiz, type QuizQuestion } from "../../lib/theory/quiz";
   import { logWarmup, notation } from "../../lib/warmupLog";
+  import { createAnimationGroup, reducedMotion } from "../../lib/motion";
+  import { nudgeWrong, popCorrect } from "../../lib/feedbackMotion";
 
   let { count = 5, onDone }: { count?: number; onDone?: (score: number, total: number) => void } = $props();
 
@@ -11,16 +13,35 @@
   let score = $state(0);
   let finished = $state(false);
   let heading = $state<HTMLElement>();
+  let optionsEl = $state<HTMLDivElement>();
+  const feedbackGroup = createAnimationGroup();
 
   const question = $derived(questions[index]);
 
   function choose(option: number) {
     if (chosen !== null) return;
     chosen = option;
-    if (option === question.answer) score++;
+    const isCorrect = option === question.answer;
+    if (isCorrect) score++;
+
+    if ($reducedMotion) return;
+    const answerIndex = question.answer;
+    feedbackGroup.finishAll();
+    void tick().then(() => {
+      if (!optionsEl || $reducedMotion) return;
+      const chosenBtn = optionsEl.querySelector<HTMLButtonElement>(`[data-option-index="${option}"]`);
+      const correctBtn = optionsEl.querySelector<HTMLButtonElement>(`[data-option-index="${answerIndex}"]`);
+      if (isCorrect) {
+        feedbackGroup.add(popCorrect(chosenBtn));
+      } else {
+        feedbackGroup.add(nudgeWrong(chosenBtn));
+        feedbackGroup.add(popCorrect(correctBtn));
+      }
+    });
   }
 
   async function next() {
+    feedbackGroup.finishAll();
     if (index + 1 >= questions.length) {
       finished = true;
       logWarmup({ kind: "quiz", score, total: questions.length });
@@ -34,6 +55,7 @@
   }
 
   async function restart() {
+    feedbackGroup.finishAll();
     questions = generateQuiz(count, Math.random, $notation);
     index = 0;
     chosen = null;
@@ -42,6 +64,10 @@
     await tick();
     heading?.focus();
   }
+
+  onDestroy(() => {
+    feedbackGroup.killAll();
+  });
 
   const verdict = $derived(score === questions.length ? "¡Perfecto!" : score >= questions.length * 0.6 ? "¡Bien!" : "A repasar un poco");
 </script>
@@ -59,9 +85,9 @@
       <span>{score} {score === 1 ? "acierto" : "aciertos"}</span>
     </div>
     <h3 bind:this={heading} tabindex="-1">{question.prompt}</h3>
-    <div class="options" role="group" aria-label="Opciones">
+    <div class="options" role="group" aria-label="Opciones" bind:this={optionsEl}>
       {#each question.options as option, i (option)}
-        <button type="button" class="option"
+        <button type="button" class="option" data-option-index={i}
           class:correct={chosen !== null && i === question.answer}
           class:wrong={chosen === i && i !== question.answer}
           disabled={chosen !== null && i !== chosen && i !== question.answer}

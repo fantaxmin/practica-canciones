@@ -4,6 +4,8 @@
   import { playExercise } from "../lib/earTrainingPlayback";
   import { playNote, stopAll } from "../lib/audio/synth";
   import { logWarmup } from "../lib/warmupLog";
+  import { createAnimationGroup, reducedMotion } from "../lib/motion";
+  import { nudgeWrong, popCorrect } from "../lib/feedbackMotion";
 
   const types: { id: ExerciseType; label: string }[] = [
     { id: "intervalo", label: "Intervalos" }, { id: "acorde", label: "Acordes" }, { id: "escala", label: "Escalas" },
@@ -20,12 +22,18 @@
   let notice = $state("");
   let audioError = $state("");
   let listenButton: HTMLButtonElement;
+  let optionsEl = $state<HTMLDivElement>();
+  const feedbackGroup = createAnimationGroup();
   const correct = $derived(selected === exercise.answerId);
 
-  onDestroy(stopAll);
+  onDestroy(() => {
+    stopAll();
+    feedbackGroup.killAll();
+  });
 
   function resetExercise() {
     stopAll();
+    feedbackGroup.finishAll();
     exercise = generateExercise(type, level, Math.random);
     selected = null;
     heard = false;
@@ -64,9 +72,26 @@
     if (!heard || selected !== null) return;
     selected = id;
     total += 1;
-    if (id === exercise.answerId) { score += 1; streak += 1; }
+    const isCorrect = id === exercise.answerId;
+    if (isCorrect) { score += 1; streak += 1; }
     else streak = 0;
     notice = "";
+
+    if ($reducedMotion) return;
+    const answerId = exercise.answerId;
+    feedbackGroup.finishAll();
+    void tick().then(() => {
+      if (!optionsEl || $reducedMotion) return;
+      const buttons = Array.from(optionsEl.querySelectorAll<HTMLButtonElement>("button[data-option-id]"));
+      const chosenBtn = buttons.find((b) => b.dataset.optionId === id);
+      const correctBtn = buttons.find((b) => b.dataset.optionId === answerId);
+      if (isCorrect) {
+        feedbackGroup.add(popCorrect(chosenBtn));
+      } else {
+        feedbackGroup.add(nudgeWrong(chosenBtn));
+        feedbackGroup.add(popCorrect(correctBtn));
+      }
+    });
   }
 
   async function next() {
@@ -122,9 +147,9 @@
       {/if}
     </div>
     <p class="hint instruction">{selected !== null ? "Puedes repetir el audio o pasar al siguiente ejercicio." : heard ? "Elige una respuesta." : "Pulsa Escuchar antes de responder."}</p>
-    <div class="options" aria-label="Opciones de respuesta">
+    <div class="options" aria-label="Opciones de respuesta" bind:this={optionsEl}>
       {#each exercise.options as option (option.id)}
-        <button type="button" class="answer" class:right={selected !== null && option.id === exercise.answerId} class:wrong={selected === option.id && !correct} disabled={!heard} aria-disabled={selected !== null} onclick={() => answer(option.id)}>
+        <button type="button" class="answer" data-option-id={option.id} class:right={selected !== null && option.id === exercise.answerId} class:wrong={selected === option.id && !correct} disabled={!heard} aria-disabled={selected !== null} onclick={() => answer(option.id)}>
           <span>{option.label}</span>
           {#if selected !== null && option.id === exercise.answerId}<small>Respuesta correcta</small>
           {:else if selected === option.id}<small>Tu respuesta</small>{/if}

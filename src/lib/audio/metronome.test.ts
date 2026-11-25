@@ -6,6 +6,35 @@ vi.mock("./synth", () => ({ audioContext: () => audio.context }));
 afterEach(() => vi.useRealTimers());
 
 describe("reloj del metrónomo", () => {
+  it("congela la programación suspendido y omite pasos vencidos tras segundo plano", () => {
+    vi.useFakeTimers();
+    const gain = { gain: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() }, connect: vi.fn(), disconnect: vi.fn() };
+    const ctx = {
+      state: "running", currentTime: 10, destination: {}, createGain: () => gain,
+      createOscillator: () => ({ start: vi.fn(), stop: vi.fn(), connect: () => gain, disconnect: vi.fn(), frequency: { value: 0 } }),
+    };
+    audio.context = ctx;
+    const onStep = vi.fn();
+    const metronome = startMetronome({ bpm: 120, bars: 1, subdivision: 4, onStep });
+    ctx.currentTime = 10.06;
+    ctx.state = "suspended";
+    vi.advanceTimersByTime(5000);
+    expect(onStep).not.toHaveBeenCalled();
+    ctx.state = "running";
+    vi.advanceTimersByTime(25);
+    expect(onStep).toHaveBeenCalledExactlyOnceWith(0, 10.15);
+    onStep.mockClear();
+    ctx.currentTime = 11.51;
+    vi.advanceTimersByTime(25);
+    expect(onStep).toHaveBeenCalledTimes(1);
+    expect(onStep.mock.calls[0][0]).toBe(11);
+    expect(onStep.mock.calls[0][1]).toBeCloseTo(11.525);
+    ctx.currentTime = 12.6;
+    vi.advanceTimersByTime(5000);
+    expect(onStep).toHaveBeenCalledTimes(1);
+    metronome.stop();
+  });
+
   it("calcula tiempos absolutos para negras, corcheas y semicorcheas", () => {
     expect(schedulerTimes(120, 1, 10, 4)).toEqual([10, 10.5, 11, 11.5]);
     expect(schedulerTimes(60, 2, 3, 4)).toEqual([3, 3.5, 4, 4.5]);

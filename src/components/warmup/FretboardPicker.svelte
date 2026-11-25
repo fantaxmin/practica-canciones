@@ -1,8 +1,11 @@
 <script lang="ts">
+  import { onDestroy, tick } from "svelte";
   import type { Notation } from "../../lib/theory/notes";
   import type { Tuning } from "../../lib/theory/fretboard";
   import { noteName } from "../../lib/theory/notes";
   import { spelledFor, spotKey, stringName, type FretSpot, type SpotState } from "../../lib/noteFinder";
+  import { createAnimationGroup, reducedMotion } from "../../lib/motion";
+  import { nudgeWrong, popCorrect } from "../../lib/feedbackMotion";
 
   let { tuning, maxFret = 12, marks = {}, showNames = false, highlightString, notation = "latin", disabled = false, onPick }: {
     tuning: Tuning;
@@ -23,6 +26,10 @@
   const TOP = 24;
   const INLAYS = [3, 5, 7, 9];
 
+  let svgEl = $state<SVGSVGElement>();
+  const feedbackGroup = createAnimationGroup();
+  let prevMarks: Record<string, SpotState> = {};
+
   const strings = $derived(tuning.strings.length);
   const width = $derived(NUT_X + maxFret * FRET_W + 16);
   const height = $derived(TOP + (strings - 1) * GAP + 40);
@@ -31,6 +38,46 @@
   const spots = $derived(tuning.strings.flatMap((_, string) => Array.from({ length: maxFret + 1 }, (_, fret) => ({ string, fret }))));
   const label = (spot: FretSpot) => noteName(spelledFor(tuning.strings[spot.string] + spot.fret), notation);
   const stateLabel: Record<SpotState, string> = { selected: "marcada", correct: "correcta", wrong: "incorrecta", missed: "faltó", target: "esta" };
+
+  $effect(() => {
+    const currentMarks = marks;
+    const newlyCorrect: string[] = [];
+    const newlyWrong: string[] = [];
+
+    for (const [key, state] of Object.entries(currentMarks)) {
+      if (prevMarks[key] === state) continue;
+      if (state === "correct") newlyCorrect.push(key);
+      else if (state === "wrong") newlyWrong.push(key);
+    }
+    prevMarks = { ...currentMarks };
+
+    feedbackGroup.finishAll();
+    if ($reducedMotion || (!newlyCorrect.length && !newlyWrong.length)) return;
+
+    let cancelled = false;
+    void tick().then(() => {
+      if (cancelled || !svgEl || $reducedMotion) return;
+      for (const key of newlyCorrect) {
+        const el = svgEl.querySelector<SVGGElement>(`[data-spot-key="${key}"]`);
+        if (el) {
+          const origin = `${el.dataset.cx ?? 0} ${el.dataset.cy ?? 0}`;
+          feedbackGroup.add(popCorrect(el, { scale: 1.18, svgOrigin: origin }));
+        }
+      }
+      for (const key of newlyWrong) {
+        const el = svgEl.querySelector<SVGGElement>(`[data-spot-key="${key}"]`);
+        if (el) feedbackGroup.add(nudgeWrong(el));
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  onDestroy(() => {
+    feedbackGroup.killAll();
+  });
 
   function keydown(event: KeyboardEvent, spot: FretSpot) {
     if (event.key === "Enter" || event.key === " ") {
@@ -41,7 +88,7 @@
 </script>
 
 <div class="picker">
-  <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height} role="group" aria-label={`Diapasón interactivo: ${tuning.name}`}>
+  <svg bind:this={svgEl} viewBox={`0 0 ${width} ${height}`} width={width} height={height} role="group" aria-label={`Diapasón interactivo: ${tuning.name}`}>
     <rect x={NUT_X} y={TOP - 10} width={maxFret * FRET_W} height={(strings - 1) * GAP + 20} rx="4" class="wood" />
     {#if highlightString !== undefined}
       <rect x="0" y={stringY(highlightString) - GAP / 2} width={width} height={GAP} class="string-highlight" />
@@ -63,15 +110,18 @@
       <text x="4" y={stringY(string) + 4} class="open-name" class:active={highlightString === string}>{stringName(tuning, string, notation)}</text>
     {/each}
     {#each spots as spot (spotKey(spot))}
-      {@const state = marks[spotKey(spot)]}
-      <g class="spot {state ?? ''}" class:named={showNames} role="button" tabindex={disabled ? -1 : 0}
+      {@const key = spotKey(spot)}
+      {@const state = marks[key]}
+      {@const cx = fretX(spot.fret)}
+      {@const cy = stringY(spot.string)}
+      <g class="spot {state ?? ''}" class:named={showNames} data-spot-key={key} data-cx={cx} data-cy={cy} role="button" tabindex={disabled ? -1 : 0}
         aria-label={`Cuerda ${stringName(tuning, spot.string, notation)}, traste ${spot.fret}${showNames ? `: ${label(spot)}` : ""}${state ? `, ${stateLabel[state]}` : ""}`}
         aria-disabled={disabled}
         onclick={() => !disabled && onPick?.(spot)} onkeydown={(e) => keydown(e, spot)}>
-        <rect x={fretX(spot.fret) - 22} y={stringY(spot.string) - GAP / 2} width="44" height={GAP} class="hit" />
-        <circle cx={fretX(spot.fret)} cy={stringY(spot.string)} r="12.5" />
+        <rect x={cx - 22} y={cy - GAP / 2} width="44" height={GAP} class="hit" />
+        <circle {cx} {cy} r="12.5" />
         {#if showNames || state === "missed" || state === "correct" || state === "wrong"}
-          <text x={fretX(spot.fret)} y={stringY(spot.string) + 4}>{label(spot)}</text>
+          <text x={cx} y={cy + 4}>{label(spot)}</text>
         {/if}
       </g>
     {/each}

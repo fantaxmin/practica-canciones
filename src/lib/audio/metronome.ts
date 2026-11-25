@@ -71,6 +71,12 @@ export function startMetronome(options: MetronomeOptions): Metronome {
   }
   function schedule() {
     if (stopped) return;
+    if (ctx.state === "closed") return;
+    // Un contexto suspendido conserva su reloj: no programar notas que lo reanuden.
+    if (ctx.state && ctx.state !== "running") {
+      timer = setTimeout(schedule, 25);
+      return;
+    }
     const now = ctx.currentTime;
     while (next < times.length && times[next] < now + .1) {
       const index = next++;
