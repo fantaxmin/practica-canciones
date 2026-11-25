@@ -2,10 +2,11 @@
   import { onMount, untrack } from "svelte";
   import type { Song } from "../lib/types";
   import { parseMmSs, formatMmSs } from "../lib/duration";
-  import { looksLikeUrl } from "../lib/youtube";
+  import { extractYoutubeId, looksLikeUrl } from "../lib/youtube";
   import { songs } from "../lib/stores";
   import { deleteAudio, getAudioBlob, getAudioHandle, saveAudioBlob, MAX_AUDIO_BYTES, formatAudioSize } from "../lib/audioStore";
-  import { extractDriveId } from "../lib/drive";
+  import { extractDriveId, extractDriveLink } from "../lib/drive";
+  import { durationFromDrive, durationFromFile, durationFromYoutube } from "../lib/detectDuration";
 
   let {
     song = null,
@@ -48,6 +49,68 @@
   let dragging = $state(false);
   let fileInput = $state<HTMLInputElement>();
   const validDriveLink = $derived(extractDriveId(driveUrl) !== null);
+
+  // Duración automática: se rellena sola salvo que el usuario haya escrito la suya.
+  type DurationOrigin = "audio" | "youtube";
+  const originLabel: Record<DurationOrigin, string> = { audio: "audio", youtube: "video de YouTube" };
+  let autoDuration = $state<{ value: string; origin: DurationOrigin } | null>(null);
+  let durationStatus = $state("");
+  let suggestedDuration = $state<string | null>(null);
+  const detectTokens: Record<DurationOrigin, number> = { audio: 0, youtube: 0 };
+  const youtubeId = $derived(extractYoutubeId(youtubeUrl.trim()));
+  const driveLink = $derived(audioSource === "drive" ? extractDriveLink(driveUrl) : null);
+  const initialYoutubeId = extractYoutubeId(initialSong?.youtubeUrl ?? "");
+  const initialDriveId = extractDriveId(initialSong?.driveUrl ?? "");
+
+  function durationIsOurs() {
+    return !durationInput.trim() || durationInput === autoDuration?.value;
+  }
+
+  async function detectDuration(origin: DurationOrigin, task: Promise<number | null>) {
+    const token = ++detectTokens[origin];
+    durationStatus = "Detectando duración…";
+    suggestedDuration = null;
+    const seconds = await task.catch(() => null);
+    if (token !== detectTokens[origin]) return;
+    durationStatus = "";
+    if (seconds === null) {
+      if (!durationInput.trim()) durationStatus = `No se pudo leer la duración del ${originLabel[origin]}; escríbela a mano.`;
+      return;
+    }
+    const value = formatMmSs(seconds);
+    if (value === durationInput) return;
+    // El audio es la canción en sí; el video puede traer intro, así que no lo pisa.
+    const audioWins = origin === "youtube" && autoDuration?.origin === "audio" && durationInput === autoDuration.value;
+    if (durationIsOurs() && !audioWins) {
+      durationInput = value;
+      autoDuration = { value, origin };
+      durationError = "";
+      durationStatus = `Tomada del ${originLabel[origin]}. Puedes ajustarla.`;
+    } else {
+      suggestedDuration = value;
+      durationStatus = `El ${originLabel[origin]} dura ${value}.`;
+    }
+  }
+
+  function useSuggestedDuration() {
+    if (!suggestedDuration) return;
+    durationInput = suggestedDuration;
+    durationError = "";
+    suggestedDuration = null;
+    durationStatus = "";
+  }
+
+  $effect(() => {
+    const id = youtubeId;
+    if (!id || id === initialYoutubeId) return;
+    untrack(() => detectDuration("youtube", durationFromYoutube(id)));
+  });
+
+  $effect(() => {
+    const link = driveLink;
+    if (!link || link.id === initialDriveId) return;
+    untrack(() => detectDuration("audio", durationFromDrive(link.id, link.resourcekey)));
+  });
 
   onMount(() => {
     let active = true;
@@ -100,6 +163,7 @@
       audioFileSize = file.size;
       legacyAudio = false;
       audioRemoved = false;
+      void detectDuration("audio", durationFromFile(file));
     }
     if (fileInput) fileInput.value = "";
   }
@@ -211,6 +275,11 @@
       driveUrl = "";
       audioFileName = null;
       audioRemoved = false;
+      autoDuration = null;
+      suggestedDuration = null;
+      durationStatus = "";
+      detectTokens.audio++;
+      detectTokens.youtube++;
     }
   }
 </script>
@@ -270,7 +339,13 @@
 
   <div class="field duration-input">
     <label for="duration-{uid}">Duración <span aria-hidden="true">*</span></label>
-    <input id="duration-{uid}" type="text" bind:value={durationInput} placeholder="3:45" onblur={validateDuration} aria-invalid={!!durationError} />
+    <input id="duration-{uid}" type="text" bind:value={durationInput} placeholder="3:45" onblur={validateDuration} aria-invalid={!!durationError} aria-describedby={durationStatus ? `duration-status-${uid}` : undefined} />
+    {#if durationStatus}
+      <p id="duration-status-{uid}" class="hint" aria-live="polite">
+        {durationStatus}
+        {#if suggestedDuration}<button type="button" class="link-btn" onclick={useSuggestedDuration}>Usar</button>{/if}
+      </p>
+    {/if}
     {#if durationError}<p class="field-error">⚠ {durationError}</p>{/if}
   </div>
 
@@ -325,6 +400,8 @@
   .duration-input {
     width: 160px;
   }
+  .duration-input .hint { width: max-content; max-width: min(320px, 80vw); }
+  .link-btn { padding:0 4px; color:var(--text); background:none; border:0; font:inherit; font-weight:700; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
   .duration-input input { width:100%; }
   .audio-field {
     display: flex;
