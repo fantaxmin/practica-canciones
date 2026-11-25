@@ -1,7 +1,7 @@
 import { get } from "svelte/store";
 import { songs } from "./stores";
 import { practiceLog, type PracticeEvent } from "./practiceLog";
-import { practiceSession, type PracticeSession } from "./practiceSession";
+import { practiceSession, migratePracticeSession, type PracticeSession } from "./practiceSession";
 import { warmupLog, type WarmupEvent } from "./warmupLog";
 import { excludedArtists } from "./setlistPrefs";
 import { getAudioBlob, getAudioHandle } from "./audioStore";
@@ -103,7 +103,7 @@ export function parseBackup(raw: string): { backup: AppBackup; summary: ImportSu
 export function restoreBackup(backup: AppBackup): void {
   songs.set(backup.songs.map(({ localAudioFileName: _name, ...song }) => ({ ...song, driveUrl: song.driveUrl ?? "", audioFileId: null })));
   practiceLog.set(backup.practiceLog);
-  practiceSession.set(backup.practiceSession ?? null);
+  practiceSession.set(migratePracticeSession(backup.practiceSession));
   if (Array.isArray(backup.warmupLog)) warmupLog.set(backup.warmupLog);
   if (Array.isArray(backup.excludedArtists)) excludedArtists.set(backup.excludedArtists.filter((a) => typeof a === "string"));
 }
