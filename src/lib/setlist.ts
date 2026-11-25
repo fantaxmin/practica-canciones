@@ -1,14 +1,5 @@
 import type { Instrument, Song } from "./types";
 
-function shuffle<T>(items: T[]): T[] {
-  const result = [...items];
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
-}
-
 export function normalizeArtist(artist: string | undefined): string {
   return (artist ?? "").trim().toLowerCase();
 }
@@ -23,7 +14,7 @@ export function withoutExcludedArtists(songs: Song[], excludedArtists: readonly 
 /**
  * Arma un setlist aleatorio para un instrumento que no supere targetSeconds.
  * Si se indica priorityArtist, sus canciones van primero. Dentro de cada grupo
- * prioriza canciones no practicadas recientemente, pero el orden es aleatorio
+ * pondera canciones no practicadas recientemente, pero el orden es aleatorio
  * para variar entre generaciones. Las canciones de excludedArtists nunca entran.
  */
 export function generateSetlist(
@@ -31,7 +22,8 @@ export function generateSetlist(
   instrument: Instrument,
   targetSeconds: number,
   priorityArtist?: string,
-  excludedArtists: readonly string[] = []
+  excludedArtists: readonly string[] = [],
+  options: { previousIds?: readonly string[] } = {}
 ): Song[] {
   if (!Number.isFinite(targetSeconds) || targetSeconds <= 0) return [];
   const candidates = withoutExcludedArtists(songs, excludedArtists).filter((s) => s.instruments[instrument] && Number.isFinite(s.durationSeconds) && s.durationSeconds > 0);
@@ -44,26 +36,51 @@ export function generateSetlist(
     ? candidates.filter((s) => s.artist?.trim().toLowerCase() !== normalizedArtist)
     : candidates;
 
-  // Barajar antes de ordenar conserva variación entre canciones de la misma antigüedad.
-  // Nunca practicadas primero; después, bloques semanales desde la última práctica.
+  // Carrera exponencial: mayor antigüedad aumenta la probabilidad, sin buckets.
   const now = Date.now();
-  const bucket = (song: Song) => song.lastPracticedAt === null
-    ? Infinity : Math.max(0, Math.floor((now - song.lastPracticedAt) / (7 * 86400000)));
-  const byFreshness = (group: Song[]) => shuffle(group).sort((a, b) => {
-    const left = bucket(a);
-    const right = bucket(b);
-    return left === right ? 0 : left > right ? -1 : 1;
-  });
-  const prioritized = [...byFreshness(priority), ...byFreshness(rest)];
-
-  const setlist: Song[] = [];
-  let total = 0;
-  for (const song of prioritized) {
-    if (total + song.durationSeconds <= targetSeconds) {
-      setlist.push(song);
-      total += song.durationSeconds;
+  const weighted = (group: Song[]) => group.map((song) => {
+    const weeks = song.lastPracticedAt == null ? 12 : Math.max(0, (now - song.lastPracticedAt) / (7 * 86400000));
+    const weight = 1 + Math.min(12, weeks);
+    return { song, rank: -Math.log(Math.max(Number.EPSILON, Math.random())) / weight };
+  }).sort((a, b) => a.rank - b.rank).map(({ song }) => song);
+  const previous = new Set(options.previousIds ?? []);
+  const sameOrder = (hand: Song[]) => hand.length === options.previousIds?.length
+    && hand.every((song, index) => song.id === options.previousIds?.[index]);
+  let best: Song[] = [];
+  let bestOverlap = Infinity;
+  let bestPriority = -1;
+  const attempts = previous.size ? 64 : 1;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const rotate = (group: Song[]) => {
+      const ordered = weighted(group);
+      const offset = attempt % Math.max(1, ordered.length);
+      return [...ordered.slice(offset), ...ordered.slice(0, offset)];
+    };
+    const hand: Song[] = [];
+    let total = 0;
+    for (const song of [...rotate(priority), ...rotate(rest)]) {
+      if (total + song.durationSeconds <= targetSeconds) {
+        hand.push(song);
+        total += song.durationSeconds;
+      }
+    }
+    const priorityCount = hand.filter((song) => normalizeArtist(song.artist) === normalizedArtist).length;
+    const overlap = hand.filter((song) => previous.has(song.id)).length;
+    if (priorityCount > bestPriority || (priorityCount === bestPriority && (
+      overlap < bestOverlap || (overlap === bestOverlap && (
+        hand.length > best.length || (hand.length === best.length && sameOrder(best) && !sameOrder(hand))
+      ))
+    ))) {
+      best = hand;
+      bestOverlap = overlap;
+      bestPriority = priorityCount;
     }
   }
-
-  return setlist;
+  // Incluso con un RNG constante, variar el orden cuando no cambia el conjunto.
+  if (sameOrder(best) && best.length > 1) {
+    const index = best.findIndex((song, i) => i > 0
+      && (normalizeArtist(song.artist) === normalizedArtist) === (normalizeArtist(best[i - 1].artist) === normalizedArtist));
+    if (index > 0) [best[index - 1], best[index]] = [best[index], best[index - 1]];
+  }
+  return best;
 }

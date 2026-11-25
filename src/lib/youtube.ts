@@ -32,3 +32,7 @@ export function looksLikeUrl(value: string): boolean {
   if (!trimmed) return false;
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) || /\byoutube\.com\b|\byoutu\.be\b/i.test(trimmed);
 }
+
+export function youtubeThumbnailUrl(id: string): string {
+  return `https://i.ytimg.com/vi/${encodeURIComponent(id)}/mqdefault.jpg`;
+}

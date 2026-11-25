@@ -2,15 +2,13 @@
   import { onMount, tick } from "svelte";
   import type { Instrument, Song, Tab } from "../lib/types";
   import { formatMmSs } from "../lib/duration";
-  import { daysSince } from "../lib/freshness";
   import { generateSetlist, normalizeArtist, withoutExcludedArtists } from "../lib/setlist";
   import { excludedArtists } from "../lib/setlistPrefs";
   import { songs } from "../lib/stores";
-  import { extractYoutubeId } from "../lib/youtube";
   import { logPractice } from "../lib/practiceLog";
   import { practiceSession } from "../lib/practiceSession";
-  import VideoPlayer from "./VideoPlayer.svelte";
-  import AudioPlayer from "./AudioPlayer.svelte";
+  import CardTable from "./setlist/CardTable.svelte";
+  import { startPractice, finishWarmup, practiced, skip as skipCard, back, reshuffle } from "../lib/sessionDeck";
   import WarmupRoutine from "./warmup/WarmupRoutine.svelte";
 
   let { onNavigate }: { onNavigate: (tab: Tab) => void } = $props();
@@ -18,10 +16,10 @@
   let minutes = $state<number | undefined>($practiceSession?.minutes ?? 15);
   let priorityArtist = $state($practiceSession?.priorityArtist ?? "");
   let controlsOpen = $state(false);
-  let media = $state<"video" | "audio" | null>(null);
+  let cardTable = $state<CardTable>();
+  let dealKey = $state(0);
   let currentHeading = $state<HTMLHeadingElement>();
   let minutesInput = $state<HTMLInputElement>();
-  let now = $state(Date.now());
 
   const instrumentSongs = $derived($songs.filter((song) => song.instruments[instrument]));
   const instrumentArtists = $derived([...new Set(instrumentSongs.map((song) => song.artist.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es")));
@@ -38,9 +36,6 @@
   const currentSong = $derived(sessionSongs[currentIndex] ?? null);
   const practicedCount = $derived(sessionSongs.filter((song) => $practiceSession?.practicedIds.includes(song.id)).length);
   const sessionDone = $derived($practiceSession !== null && currentIndex >= sessionSongs.length);
-  const currentVideoId = $derived(currentSong ? extractYoutubeId(currentSong.youtubeUrl) : null);
-  const hasAudio = $derived(!!(currentSong?.audioFileId || currentSong?.driveUrl));
-  const freshness = $derived(daysSince(currentSong?.lastPracticedAt ?? null, now));
   const practicedSeconds = $derived(sessionSongs.filter((song) => $practiceSession?.practicedIds.includes(song.id)).reduce((sum, song) => sum + song.durationSeconds, 0));
   const sessionSeconds = $derived(sessionSongs.reduce((sum, song) => sum + song.durationSeconds, 0));
   const targetSeconds = $derived(($practiceSession?.minutes ?? 0) * 60);
@@ -52,32 +47,38 @@
   });
 
   onMount(() => {
-    const clock = setInterval(() => { now = Date.now(); }, 60_000);
     if (currentSong || sessionDone) void focusCurrent();
-    return () => clearInterval(clock);
   });
 
   $effect(() => {
     if (priorityArtist && !availableArtists.includes(priorityArtist)) priorityArtist = "";
   });
-  $effect(() => {
-    // Al cambiar de canción, no dejar abierto el reproductor anterior.
-    const id = currentSong?.id;
-    if (id) media = null;
-  });
-
   async function focusCurrent() {
     await tick();
-    currentHeading?.focus();
+    if ($practiceSession?.stage === "playing") await cardTable?.focusCurrent();
+    else currentHeading?.focus();
   }
 
   function generate() {
     if (!validMinutes || !candidates.length || minutes === undefined) return;
     const result = generateSetlist($songs, instrument, minutes * 60, priorityArtist || undefined, excludedHere);
-    practiceSession.set({ instrument, minutes, priorityArtist, excludedArtists: excludedHere, songIds: result.map((song) => song.id), currentIndex: 0, practicedIds: [], warmup: result.length ? "pending" : undefined });
+    practiceSession.set({ instrument, minutes, priorityArtist, excludedArtists: excludedHere, songIds: result.map((song) => song.id), currentIndex: 0, practicedIds: [], stage: "deal" });
+    dealKey += 1;
     controlsOpen = false;
-    media = null;
     void focusCurrent();
+  }
+
+  function rebarajar() {
+    const session = $practiceSession;
+    if (!session || session.stage !== "deal") return;
+    const result = generateSetlist($songs, session.instrument, session.minutes * 60, session.priorityArtist, session.excludedArtists, { previousIds: session.songIds });
+    practiceSession.set(reshuffle(session, result.map((song) => song.id)));
+    dealKey += 1;
+    void focusCurrent();
+  }
+
+  function beginPractice() {
+    practiceSession.update((session) => session ? startPractice(session) : session);
   }
 
   function toggleExcluded(artist: string) {
@@ -100,39 +101,36 @@
 
   function markAndNext() {
     const song = currentSong;
-    if (!song) return;
+    if (!song || $practiceSession?.stage !== "playing") return;
     if (!$practiceSession?.practicedIds.includes(song.id)) {
-      now = Date.now();
+      const now = Date.now();
       songs.update((all) => all.map((item) => item.id === song.id ? { ...item, lastPracticedAt: now } : item));
       logPractice(song.id, song.title, song.durationSeconds);
     }
-    practiceSession.update((session) => session ? {
-      ...session,
-      currentIndex: session.currentIndex + 1,
-      practicedIds: [...new Set([...session.practicedIds, song.id])],
-    } : session);
+    practiceSession.update((session) => session ? practiced(session) : session);
     void focusCurrent();
   }
 
   function setWarmup(state: "done" | "skipped") {
-    practiceSession.update((session) => session ? { ...session, warmup: state } : session);
+    practiceSession.update((session) => session ? finishWarmup(session, state) : session);
     window.scrollTo({ top: 0 });
     void focusCurrent();
   }
 
   function skip() {
-    practiceSession.update((session) => session ? { ...session, currentIndex: session.currentIndex + 1 } : session);
+    practiceSession.update((session) => session ? skipCard(session) : session);
     void focusCurrent();
   }
 
   function goBack() {
-    practiceSession.update((session) => session && session.currentIndex > 0 ? { ...session, currentIndex: session.currentIndex - 1 } : session);
+    practiceSession.update((session) => session ? back(session) : session);
     void focusCurrent();
   }
 
   function repeatSession() {
-    practiceSession.update((session) => session ? { ...session, currentIndex: 0, practicedIds: [] } : session);
+    practiceSession.update((session) => session ? reshuffle(session, session.songIds) : session);
     controlsOpen = false;
+    dealKey += 1;
     void focusCurrent();
   }
 
@@ -235,7 +233,14 @@
           <button class="pill-btn" onclick={() => onNavigate("repertorio")}>Ir a Mi repertorio</button>
         </div>
       </div>
-    {:else if $practiceSession.warmup === "pending"}
+    {:else if $practiceSession.stage === "deal"}
+      <h3 bind:this={currentHeading} tabindex="-1">Tu setlist · {sessionSongs.length} canciones · {formatMmSs(sessionSeconds)}</h3>
+      <CardTable songs={sessionSongs} {currentIndex} practicedIds={$practiceSession.practicedIds} stage="deal" {dealKey} instrument={$practiceSession.instrument} />
+      <div class="done-actions">
+        <button class="press-btn" onclick={beginPractice}>Empezar práctica</button>
+        <button class="pill-btn" onclick={rebarajar}>Rebarajar</button>
+      </div>
+    {:else if $practiceSession.stage === "warmup"}
       <WarmupRoutine instrument={$practiceSession.instrument} embedded onFinish={() => setWarmup("done")} onSkip={() => setWarmup("skipped")} />
     {:else}
       <div class="session-progress">
@@ -245,67 +250,37 @@
         </div>
         <p class="bar-total">{formatMmSs(practicedSeconds)} de {formatMmSs(targetSeconds)}</p>
       </div>
+        <CardTable bind:this={cardTable} songs={sessionSongs} {currentIndex} practicedIds={$practiceSession.practicedIds} stage={sessionDone ? "complete" : "playing"} {dealKey} instrument={$practiceSession.instrument}>
+          {#snippet actions()}
+            <div class="session-actions">
+              <button class="pill-btn" onclick={goBack} disabled={currentIndex === 0}>Anterior</button>
+              <button class="pill-btn" onclick={skip}>Saltar</button>
+              <button class="press-btn next-primary" onclick={markAndNext}>Practicada y seguir</button>
+            </div>
+          {/snippet}
+        </CardTable>
       {#if sessionDone}
         <div class="card done-card">
           <h3 bind:this={currentHeading} tabindex="-1">Sesión completa</h3>
           <p>{practicedCount} {practicedCount === 1 ? "canción practicada" : "canciones practicadas"} · {sessionSongs.length - practicedCount} {sessionSongs.length - practicedCount === 1 ? "saltada" : "saltadas"} · {formatMmSs(practicedSeconds)} de práctica</p>
           <div class="done-actions">
+            <button class="pill-btn" onclick={goBack}>Anterior</button>
             <button class="press-btn" onclick={repeatSession}>Repetir setlist</button>
             <button class="pill-btn" onclick={newSetlist}>Nuevo setlist</button>
             <button class="pill-btn" onclick={() => practiceSession.set(null)}>Cerrar</button>
           </div>
         </div>
       {:else if currentSong}
-        <div class="card current-card">
-          <div class="row">
-            <div class="info">
-              <h3 bind:this={currentHeading} tabindex="-1">{currentSong.title}</h3>
-              {#if currentSong.artist}<p class="artist">{currentSong.artist}</p>{/if}
-              <div class="badges">
-                {#if currentSong.instruments.bajo}<span class="badge bajo"><span aria-hidden="true">B · </span>Bajo</span>{/if}
-                {#if currentSong.instruments.guitarra}<span class="badge guitarra"><span aria-hidden="true">G · </span>Guitarra</span>{/if}
-              </div>
-              <p class="freshness"><span class="freshness-dot {freshness.level}" aria-hidden="true"></span>{freshness.text}</p>
-            </div>
-            <span class="duration">{formatMmSs(currentSong.durationSeconds)}</span>
-          </div>
-          <div class="media-controls">
-            {#if currentVideoId}
-              <button class="pill-btn" aria-expanded={media === "video"} aria-controls="current-video" onclick={() => (media = media === "video" ? null : "video")}>{media === "video" ? "Ocultar video" : "Ver video"}</button>
-            {:else if currentSong.youtubeUrl}
-              <a class="ink-btn" href={currentSong.youtubeUrl} target="_blank" rel="noopener noreferrer">Abrir enlace</a>
-            {/if}
-            {#if hasAudio}
-              <button class="pill-btn audio-toggle" aria-expanded={media === "audio"} aria-controls="current-audio" onclick={() => (media = media === "audio" ? null : "audio")}>
-                <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 18V5l11-2v13M9 8l11-2" stroke="currentColor" stroke-width="2"/><ellipse cx="6" cy="18" rx="3" ry="2" stroke="currentColor" stroke-width="2"/><ellipse cx="17" cy="16" rx="3" ry="2" stroke="currentColor" stroke-width="2"/></svg>
-                {media === "audio" ? "Ocultar audio" : "Ver audio"}
-              </button>
-            {/if}
-          </div>
-          <div id="current-video">
-            {#if media === "video" && currentVideoId}
-              {#key currentSong.id}<div class="media-wrap"><VideoPlayer videoId={currentVideoId} title={currentSong.title} /></div>{/key}
-            {/if}
-          </div>
-          <div id="current-audio">
-            {#if media === "audio" && hasAudio}
-              {#key currentSong.id}<div class="media-wrap"><AudioPlayer audioFileId={currentSong.audioFileId} driveUrl={currentSong.driveUrl} title={currentSong.title} /></div>{/key}
-            {/if}
-          </div>
-        </div>
         <p class="next-song">{sessionSongs[currentIndex + 1] ? `Siguiente: ${sessionSongs[currentIndex + 1].title}` : "Última canción de la sesión"}</p>
-        <div class="session-actions">
-          <button class="pill-btn" onclick={goBack} disabled={currentIndex === 0}>Anterior</button>
-          <button class="pill-btn" onclick={skip}>Saltar</button>
-          <button class="press-btn next-primary" onclick={markAndNext}>Practicada y seguir</button>
-        </div>
       {/if}
+    {/if}
+    {#if sessionSongs.length}
       <details class="session-list">
         <summary>Ver lista completa <span>· {sessionSongs.length} {sessionSongs.length === 1 ? "canción" : "canciones"} · {formatMmSs(sessionSeconds)}</span></summary>
         <ol>
           {#each sessionSongs as song, index (song.id)}
-            <li aria-current={!sessionDone && index === currentIndex ? "step" : undefined}>
-              <span class="list-title">{song.title}<small>{$practiceSession.practicedIds.includes(song.id) ? "Practicada" : !sessionDone && index === currentIndex ? "En curso" : sessionDone || index < currentIndex ? "Saltada" : "Pendiente"}</small></span>
+            <li aria-current={$practiceSession.stage === "playing" && !sessionDone && index === currentIndex ? "step" : undefined}>
+              <span class="list-title">{song.title}<small>{$practiceSession.practicedIds.includes(song.id) ? "Practicada" : $practiceSession.stage === "playing" && !sessionDone && index === currentIndex ? "En curso" : sessionDone || index < currentIndex ? "Saltada" : "Pendiente"}</small></span>
               <span class="duration">{formatMmSs(song.durationSeconds)}</span>
             </li>
           {/each}
@@ -319,7 +294,6 @@
   h2 { font:700 1.25rem/1.3 "Bricolage Grotesque", sans-serif; margin:0 0 20px; }
   h3 { font:700 1.375rem/1.3 "Bricolage Grotesque", sans-serif; margin:0; overflow-wrap:anywhere; }
   h3:focus-visible, summary:focus-visible { outline:3px solid var(--focus-ring); outline-offset:4px; }
-  .current-card h3[tabindex="-1"]:focus:not(:focus-visible) { outline:none; }
   .controls { display:flex; align-items:flex-end; flex-wrap:wrap; gap:16px; padding:20px; margin-bottom:24px; }
   .segmented { display:flex; gap:4px; padding:3px; border:1px solid var(--line); border-radius:var(--radius-sm); }
   .segmented button, .presets button { min-height:44px; min-width:44px; padding:8px 12px; border:0; border-radius:6px; background:transparent; color:var(--text); font-weight:700; cursor:pointer; }
@@ -362,23 +336,7 @@
   .bar-fill { height:100%; width:100%; transform-origin:left; background:color-mix(in srgb, var(--accent) 70%, var(--text)); transition:transform .2s ease-out; }
   .bar-total, .duration { font-family:"JetBrains Mono", monospace; font-size:.8125rem; color:var(--muted); }
   .bar-total { margin:8px 0 0; }
-  .current-card { padding:24px; }
-  .row { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
-  .info { min-width:0; }
   .duration { white-space:nowrap; }
-  .artist { color:var(--muted); margin:6px 0 12px; font-size:.875rem; overflow-wrap:anywhere; }
-  .badges { display:flex; gap:6px; flex-wrap:wrap; margin-top:12px; }
-  .badge { font-size:12px; color:var(--text); border:0; letter-spacing:0; }
-  .badge.bajo { background:color-mix(in srgb, var(--primary) 16%, var(--surface)); }
-  .badge.guitarra { background:color-mix(in srgb, var(--accent) 16%, var(--surface)); }
-  .freshness { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:.8125rem; margin:12px 0 0; }
-  .freshness-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
-  .fresh { background:var(--accent); } .warm { background:var(--warning); } .stale { background:color-mix(in srgb, var(--primary) 65%, var(--surface)); }
-  .media-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:16px; }
-  .media-controls:empty { display:none; }
-  .audio-toggle { display:inline-flex; align-items:center; gap:6px; }
-  .ink-btn { min-height:44px; }
-  .media-wrap { margin-top:16px; min-width:0; }
   .next-song { color:var(--muted); font-size:.875rem; margin:16px 0 0; overflow-wrap:anywhere; }
   .session-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:16px; padding:16px 0; }
   .next-primary { min-height:48px; margin-left:auto; font-size:.9375rem; }
@@ -393,7 +351,6 @@
   @media (max-width:640px) {
     .controls { padding:16px; gap:16px; }
     .time-controls, .artist-control { flex-basis:100%; min-width:0; }
-    .current-card { padding:20px 16px; }
     .controls-summary { align-items:flex-start; }
     .session-actions { display:grid; grid-template-columns:1fr 1fr; position:sticky; bottom:0; z-index:2; background:var(--surface); padding:12px 12px calc(12px + env(safe-area-inset-bottom)); border-radius:var(--radius-sm); border-top:1px solid var(--line); }
     .next-primary { grid-column:1 / -1; width:100%; margin-left:0; }

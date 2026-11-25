@@ -2,6 +2,7 @@ import { writable } from "svelte/store";
 import type { Instrument } from "./types";
 
 export interface PracticeSession {
+  stage: "deal" | "warmup" | "playing" | "complete";
   instrument: Instrument;
   minutes: number;
   /** Opcional: las sesiones anteriores siguen cargando sin este campo. */
@@ -15,6 +16,19 @@ export interface PracticeSession {
   warmup?: "pending" | "done" | "skipped";
 }
 
+/** Normaliza tanto sesiones persistidas como sesiones de respaldos antiguos. */
+export function migratePracticeSession(value: unknown): PracticeSession | null {
+  if (!value || typeof value !== "object") return null;
+  const data = value as PracticeSession;
+  if (!Array.isArray(data.songIds) || !data.songIds.every((id) => typeof id === "string")) return null;
+  if (data.instrument !== "bajo" && data.instrument !== "guitarra") return null;
+  const currentIndex = Number.isInteger(data.currentIndex) ? Math.max(0, Math.min(data.currentIndex, data.songIds.length)) : 0;
+  const stage = ["deal", "warmup", "playing", "complete"].includes(data.stage) ? data.stage
+    : data.warmup === "pending" ? "warmup" : currentIndex >= data.songIds.length ? "complete" : "playing";
+  return { ...data, currentIndex, stage,
+    practicedIds: Array.isArray(data.practicedIds) ? [...new Set(data.practicedIds.filter((id) => data.songIds.includes(id)))] : [] };
+}
+
 const STORAGE_KEY = "practica-canciones:practice-session";
 
 function loadSession(): PracticeSession | null {
@@ -22,8 +36,7 @@ function loadSession(): PracticeSession | null {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.songIds)) return null;
-    return parsed;
+    return migratePracticeSession(parsed);
   } catch {
     return null;
   }
