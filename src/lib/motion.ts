@@ -1,10 +1,16 @@
 import gsap from "gsap";
+import { tick } from "svelte";
+import { readable, type Readable } from "svelte/store";
 
 export { gsap };
 
 /** Tokens compartidos de duración (en segundos) y easing para toda la app. */
 export const MOTION = {
   duration: {
+    view: 0.16,
+    indicator: 0.22,
+    count: 0.6,
+    staggerList: 0.04,
     fast: 0.18,
     deal: 0.34,
     flip: 0.24,
@@ -25,6 +31,160 @@ export function prefersReducedMotion(): boolean {
     return false;
   }
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/** Un único listener compartido mientras haya consumidores. */
+export const reducedMotion: Readable<boolean> = readable(prefersReducedMotion(), (set) => {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+  const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const sync = () => set(query.matches);
+  sync();
+  query.addEventListener("change", sync);
+  return () => query.removeEventListener("change", sync);
+});
+
+export interface MotionHandle {
+  kill(): void;
+  finish(): void;
+}
+
+export function createAnimationGroup() {
+  const animations = new Set<MotionHandle | gsap.core.Animation>();
+  return {
+    add<T extends MotionHandle | gsap.core.Animation>(animation: T): T {
+      animations.add(animation);
+      return animation;
+    },
+    killAll() {
+      const pending = [...animations];
+      animations.clear();
+      for (const animation of pending) animation.kill();
+    },
+    finishAll() {
+      const pending = [...animations];
+      animations.clear();
+      for (const animation of pending) {
+        if ("finish" in animation) animation.finish();
+        else animation.totalProgress(1).kill();
+      }
+    },
+  };
+}
+
+let flipPromise: Promise<typeof import("gsap/Flip").Flip> | undefined;
+export function loadFlip(): Promise<typeof import("gsap/Flip").Flip> {
+  return flipPromise ??= import("gsap/Flip").then(({ Flip }) => {
+    gsap.registerPlugin(Flip);
+    return Flip;
+  }).catch((error) => {
+    flipPromise = undefined;
+    throw error;
+  });
+}
+
+const idleHandle = (): MotionHandle => ({ kill() {}, finish() {} });
+
+/** Finaliza también si cambia la preferencia durante la animación. */
+function managedHandle(animation: gsap.core.Animation, final: () => void = () => {}): MotionHandle {
+  let settled = false;
+  let finalized = false;
+  const finalize = () => {
+    if (finalized) return;
+    finalized = true;
+    final();
+  };
+  let unsubscribe = () => {};
+  const complete = animation.eventCallback("onComplete");
+  const cleanup = () => {
+    settled = true;
+    unsubscribe();
+  };
+  const handle: MotionHandle = {
+    kill() {
+      if (settled) return;
+      cleanup();
+      animation.kill();
+    },
+    finish() {
+      if (settled) return;
+      cleanup();
+      animation.totalProgress(1);
+      finalize();
+      animation.kill();
+    },
+  };
+  animation.eventCallback("onComplete", () => {
+    cleanup();
+    finalize();
+    complete?.call(animation);
+  });
+  unsubscribe = reducedMotion.subscribe((reduced) => { if (reduced) handle.finish(); });
+  if (settled) unsubscribe();
+  return handle;
+}
+
+export async function flipLayout(
+  targets: Element[] | NodeListOf<Element>,
+  mutate: () => void | Promise<void>,
+  opts: { duration?: number; stagger?: number; absolute?: boolean; onEnter?: (els: Element[]) => void; onLeave?: (els: Element[]) => void } = {}
+): Promise<MotionHandle> {
+  if (prefersReducedMotion()) {
+    await mutate();
+    await tick();
+    return idleHandle();
+  }
+  const Flip = await loadFlip();
+  const state = Flip.getState(targets);
+  await mutate();
+  await tick();
+  if (prefersReducedMotion()) return idleHandle();
+  return managedHandle(Flip.from(state, {
+    duration: opts.duration ?? MOTION.duration.view,
+    stagger: opts.stagger ?? 0,
+    absolute: opts.absolute ?? false,
+    scale: true,
+    ease: MOTION.ease.out,
+    onEnter: opts.onEnter,
+    onLeave: opts.onLeave,
+  }));
+}
+
+export function staggerIn(
+  targets: Element[] | NodeListOf<Element>,
+  opts: { y?: number; max?: number; duration?: number; stagger?: number } = {}
+): MotionHandle {
+  const elements = Array.from(targets);
+  const max = Math.max(0, Math.min(12, Math.floor(opts.max ?? 12)));
+  if (prefersReducedMotion() || max === 0 || elements.length === 0) return idleHandle();
+  return managedHandle(gsap.from(elements.slice(0, max), {
+    y: opts.y ?? 12,
+    opacity: 0,
+    duration: opts.duration ?? MOTION.duration.view,
+    stagger: opts.stagger ?? MOTION.duration.staggerList,
+    ease: MOTION.ease.out,
+    clearProps: "transform,opacity",
+  }));
+}
+
+export function countUp(
+  el: HTMLElement,
+  to: number,
+  opts: { from?: number; duration?: number; format?: (n: number) => string } = {}
+): MotionHandle {
+  const format = opts.format ?? ((value: number) => String(Math.round(value)));
+  const writeFinal = () => { el.textContent = format(to); };
+  if (prefersReducedMotion()) {
+    writeFinal();
+    return idleHandle();
+  }
+  const counter = { value: opts.from ?? 0 };
+  el.textContent = format(counter.value);
+  return managedHandle(gsap.to(counter, {
+    value: to,
+    duration: opts.duration ?? MOTION.duration.count,
+    ease: MOTION.ease.out,
+    onUpdate: () => { el.textContent = format(counter.value); },
+  }), writeFinal);
 }
 
 /**
@@ -99,10 +259,7 @@ export interface GhostFlightOptions {
   onComplete?: () => void;
 }
 
-export interface GhostFlightHandle {
-  kill(): void;
-  finish(): void;
-}
+export interface GhostFlightHandle extends MotionHandle {}
 
 function isValidRect(rect: DOMRect | null | undefined): rect is DOMRect {
   return Boolean(rect && rect.width > 0 && rect.height > 0);
@@ -230,12 +387,5 @@ export function flyGhostCard(options: GhostFlightOptions): GhostFlightHandle {
     );
   }
 
-  return {
-    kill() {
-      tl.kill();
-    },
-    finish() {
-      tl.progress(1).kill();
-    },
-  };
+  return managedHandle(tl);
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { daysSince } from "../lib/freshness";
+  import { reducedMotion } from "../lib/motion";
   import { fly, slide } from "svelte/transition";
   import type { Instrument, Song } from "../lib/types";
   import { formatMmSs } from "../lib/duration";
@@ -17,17 +18,12 @@
   let deletingId = $state<string | null>(null);
   let deleteTimer: ReturnType<typeof setTimeout> | undefined;
   let pulseTimer: ReturnType<typeof setTimeout> | undefined;
-  let reducedMotion = $state(false);
+  // La preferencia se comparte con el resto de animaciones.
   let now = $state(Date.now());
-  const motionDuration = $derived(reducedMotion ? 0 : 220);
+  const motionDuration = $derived($reducedMotion ? 0 : 220);
   onMount(() => {
-    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const sync = () => { reducedMotion = media.matches; };
-    sync();
-    media.addEventListener("change", sync);
     const clock = setInterval(() => { now = Date.now(); }, 60_000);
     return () => {
-      media.removeEventListener("change", sync);
       clearInterval(clock);
       clearTimeout(deleteTimer);
       clearTimeout(pulseTimer);

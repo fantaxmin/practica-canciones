@@ -1,33 +1,60 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onDestroy, tick } from "svelte";
   import { slide } from "svelte/transition";
   import type { Song, Tab } from "./lib/types";
   import { songs } from "./lib/stores";
   import { darkMode } from "./lib/theme";
+  import { MOTION, createAnimationGroup, gsap, reducedMotion } from "./lib/motion";
   import SongForm from "./components/SongForm.svelte";
   import SongList from "./components/SongList.svelte";
   import SetlistGenerator from "./components/SetlistGenerator.svelte";
   import Stats from "./components/Stats.svelte";
   import DataManager from "./components/DataManager.svelte";
   import Warmup from "./components/warmup/Warmup.svelte";
+  import SlidingIndicator from "./components/ui/SlidingIndicator.svelte";
 
   let tab = $state<Tab>("repertorio");
 
   let formOpen = $state($songs.length === 0);
   let addButton = $state<HTMLButtonElement>();
-  let reducedMotion = $state(false);
-  const formDuration = $derived(reducedMotion ? 0 : 220);
+  let tabsEl = $state<HTMLElement>();
+  let viewEl = $state<HTMLDivElement>();
+  const formDuration = $derived($reducedMotion ? 0 : 220);
   const totalSeconds = $derived($songs.reduce((total, song) => total + song.durationSeconds, 0));
   const totalDuration = $derived(totalSeconds >= 3600
     ? `${Math.floor(totalSeconds / 3600)} h ${Math.floor((totalSeconds % 3600) / 60)} min`
     : totalSeconds >= 60 ? `${Math.floor(totalSeconds / 60)} min` : `${totalSeconds} s`);
 
-  onMount(() => {
-    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const sync = () => { reducedMotion = media.matches; };
-    sync();
-    media.addEventListener("change", sync);
-    return () => media.removeEventListener("change", sync);
+  const viewGroup = createAnimationGroup();
+  let prevTab: Tab = "repertorio";
+
+  $effect(() => {
+    const currentTab = tab;
+    if (currentTab === prevTab) return;
+    prevTab = currentTab;
+    viewGroup.finishAll();
+    if ($reducedMotion) return;
+
+    void tick().then(() => {
+      if (tab !== currentTab || $reducedMotion || !viewEl) return;
+      viewGroup.add(
+        gsap.fromTo(
+          viewEl,
+          { opacity: 0, y: 8 },
+          {
+            opacity: 1,
+            y: 0,
+            duration: MOTION.duration.view,
+            ease: MOTION.ease.out,
+            clearProps: "transform,opacity",
+          }
+        )
+      );
+    });
+  });
+
+  onDestroy(() => {
+    viewGroup.killAll();
   });
 
   function navigate(nextTab: Tab) {
@@ -97,7 +124,8 @@
     </button>
   </div>
 
-  <nav class="tabs" aria-label="Secciones principales">
+  <nav class="tabs" aria-label="Secciones principales" bind:this={tabsEl}>
+    <SlidingIndicator container={tabsEl} activeKey={tab} />
     <button class="pill-btn" class:active={tab === "repertorio"} onclick={() => (tab = "repertorio")}>
       <span class="wide-tab">Mi repertorio</span><span class="short-tab">Repertorio</span>
     </button>
@@ -114,39 +142,40 @@
 </header>
 
 <main>
-
-  {#if tab === "repertorio"}
-    <section class="repertoire-section" aria-labelledby="repertoire-title">
-      <div class="repertoire-heading">
-        <h2 tabindex="-1" id="repertoire-title" aria-live="polite" aria-atomic="true">Mi repertorio <span>· {$songs.length} {$songs.length === 1 ? "canción" : "canciones"} · {totalDuration}</span></h2>
-        <button bind:this={addButton} class="press-btn" aria-expanded={formOpen} aria-controls="add-song-form" onclick={() => formOpen ? closeForm() : openForm()}>＋ Agregar canción</button>
-      </div>
-      <div id="add-song-form">
-        {#if formOpen}
-          <div class="card form-card" transition:slide={{ duration: formDuration }}>
-            <div class="section-heading">
-              <h2>Agregar canción</h2>
-              <p>Guarda la información esencial para tenerla lista al practicar.</p>
+  <div class="tab-view" bind:this={viewEl}>
+    {#if tab === "repertorio"}
+      <section class="repertoire-section" aria-labelledby="repertoire-title">
+        <div class="repertoire-heading">
+          <h2 tabindex="-1" id="repertoire-title" aria-live="polite" aria-atomic="true">Mi repertorio <span>· {$songs.length} {$songs.length === 1 ? "canción" : "canciones"} · {totalDuration}</span></h2>
+          <button bind:this={addButton} class="press-btn" aria-expanded={formOpen} aria-controls="add-song-form" onclick={() => formOpen ? closeForm() : openForm()}>＋ Agregar canción</button>
+        </div>
+        <div id="add-song-form">
+          {#if formOpen}
+            <div class="card form-card" transition:slide={{ duration: formDuration }}>
+              <div class="section-heading">
+                <h2>Agregar canción</h2>
+                <p>Guarda la información esencial para tenerla lista al practicar.</p>
+              </div>
+              <SongForm onSave={addSong} onCancel={closeForm} />
             </div>
-            <SongForm onSave={addSong} onCancel={closeForm} />
-          </div>
-        {/if}
-      </div>
-      <SongList onAdd={openForm} />
-    </section>
-  {:else if tab === "setlist"}
-    <section>
-      <SetlistGenerator onNavigate={navigate} />
-    </section>
-  {:else if tab === "calentamiento"}
-    <section>
-      <Warmup />
-    </section>
-  {:else}
-    <section>
-      <Stats onNavigate={navigate} />
-    </section>
-  {/if}
+          {/if}
+        </div>
+        <SongList onAdd={openForm} />
+      </section>
+    {:else if tab === "setlist"}
+      <section>
+        <SetlistGenerator onNavigate={navigate} />
+      </section>
+    {:else if tab === "calentamiento"}
+      <section>
+        <Warmup />
+      </section>
+    {:else}
+      <section>
+        <Stats onNavigate={navigate} />
+      </section>
+    {/if}
+  </div>
 
   <DataManager />
 </main>
@@ -187,11 +216,20 @@
   h2 span { color:var(--muted); font-weight:500; }
   .short-tab { display:none; }
   .tabs {
+    position: relative;
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     padding-bottom:24px;
     border-bottom:1px solid var(--line);
+  }
+  .tabs button {
+    position: relative;
+    z-index: 1;
+  }
+  .tabs:global(.has-sliding-indicator) .pill-btn.active {
+    background: transparent;
+    border-color: transparent;
   }
   section {
     margin-bottom: 32px;

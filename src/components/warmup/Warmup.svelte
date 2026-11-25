@@ -12,6 +12,7 @@
   import NoteFinder from "./NoteFinder.svelte";
   import GrooveTrainer from "../GrooveTrainer.svelte";
   import BassLineLab from "../BassLineLab.svelte";
+  import SlidingIndicator from "../ui/SlidingIndicator.svelte";
 
   type View = "rutina" | "explorar" | "teoria" | "quiz" | "oido" | "notas" | "groove" | "lineas";
   const VIEWS: { id: View; label: string }[] = [
@@ -26,6 +27,7 @@
   ];
 
   let view = $state<View>("rutina");
+  let subnavEl = $state<HTMLElement>();
   let instrument = $state<Instrument>($practiceSession?.instrument ?? "bajo");
   let root = $state<SpelledNote>({ letter: 0, accidental: 0 });
   let scaleId = $state<ScaleId>("jonico");
@@ -53,7 +55,8 @@
     </div>
   </div>
 
-  <nav class="subnav" aria-label="Secciones del calentamiento">
+  <nav class="subnav" aria-label="Secciones del calentamiento" bind:this={subnavEl}>
+    <SlidingIndicator container={subnavEl} activeKey={view} scrollActiveIntoView />
     {#each VIEWS as item (item.id)}
       <button type="button" class="pill-btn" class:active={view === item.id} aria-current={view === item.id ? "page" : undefined} onclick={() => (view = item.id)}>{item.label}</button>
     {/each}
@@ -87,7 +90,9 @@
   h2:focus { outline:none; }
   .heading p { margin:6px 0 0; color:var(--muted); font-size:.875rem; }
   .stat { font-weight:700; }
-  .subnav { display:flex; gap:8px; flex-wrap:wrap; }
+  .subnav { position:relative; display:flex; gap:8px; flex-wrap:wrap; }
+  .subnav button { position:relative; z-index:1; }
+  .subnav:global(.has-sliding-indicator) .pill-btn.active { background:transparent; border-color:transparent; }
   .pad { padding:20px; min-width:0; }
   @media (max-width:640px) { .subnav { gap:4px; flex-wrap:nowrap; overflow-x:auto; margin:0 -16px; padding:0 16px 4px; scrollbar-width:none; } .subnav button { flex:0 0 auto; padding:8px 12px; } .pad { padding:14px; } }
 </style>
