@@ -4,6 +4,8 @@
   import { audioContext, playNote, stopAll } from "../lib/audio/synth";
   import { clampBpm, startMetronome, tapTempo, type Metronome } from "../lib/audio/metronome";
   import { logWarmup, notation } from "../lib/warmupLog";
+  import { audioPosition, pulseAppearance } from "../lib/audioVisual";
+  import { reducedMotion } from "../lib/motion";
 
   let { onFinish }: { onFinish?: () => void } = $props();
   let exerciseId = $state(GROOVES[0].id);
@@ -23,6 +25,11 @@
   let frame = 0;
   let generation = 0;
   let taps: number[] = [];
+  let pulseEl = $state<HTMLSpanElement>();
+  let resumeVisual: (() => void) | undefined;
+  function neutralPulse() {
+    if (pulseEl) { pulseEl.style.transform = "scale(1)"; pulseEl.style.opacity = ".25"; }
+  }
   const bar = $derived(current < 0 ? -1 : Math.floor(current / (exercise.subdivision * 4)));
   const column = $derived(current < 0 ? -1 : current % (exercise.subdivision * 4));
   const beat = $derived(current < 0 ? 0 : Math.floor(column / exercise.subdivision) + 1);
@@ -33,6 +40,8 @@
     transport?.stop();
     transport = undefined;
     cancelAnimationFrame(frame);
+    resumeVisual = undefined;
+    neutralPulse();
     stopAll();
     mode = null;
     pending = false;
@@ -103,6 +112,7 @@
       const active = transport;
       function animate() {
         if (token !== generation) return;
+        if (document.hidden) return;
         const now = active.context.currentTime;
         if (now >= active.endTime) {
           stop();
@@ -113,11 +123,19 @@
           } else notice = "Patrón terminado. Ahora puedes practicar con el clic.";
           return;
         }
-        current = now < active.startTime ? -1 : Math.floor((now - active.startTime) * sessionBpm / 60 * sessionExercise.subdivision);
+        const position = audioPosition(now, active.startTime, sessionBpm, sessionExercise.subdivision, roundBars * 4 * sessionExercise.subdivision);
+        current = position.absoluteStep;
+        if (pulseEl) {
+          const pulse = pulseAppearance(position, $reducedMotion, active.context.state === "running");
+          pulseEl.style.transform = `scale(${pulse.scale})`;
+          pulseEl.style.opacity = String(pulse.opacity);
+        }
         frame = requestAnimationFrame(animate);
       }
-      frame = requestAnimationFrame(animate);
+      resumeVisual = () => { cancelAnimationFrame(frame); animate(); };
+      resumeVisual();
     } catch {
+      if (token !== generation) return;
       stop();
       error = "No se pudo iniciar el audio. Pulsa Escuchar o Practicar para intentarlo de nuevo.";
     } finally {
@@ -126,14 +144,15 @@
   }
 
   onMount(() => {
-    const hide = () => {
+    const visibility = () => {
+      cancelAnimationFrame(frame);
       if (document.hidden && (mode || pending)) {
         stop();
         notice = "Ronda pausada al ocultar la pestaña. Pulsa Practicar para reiniciarla desde el primer compás.";
       }
     };
-    document.addEventListener("visibilitychange", hide);
-    return () => document.removeEventListener("visibilitychange", hide);
+    document.addEventListener("visibilitychange", visibility);
+    return () => document.removeEventListener("visibilitychange", visibility);
   });
   onDestroy(stop);
 </script>
@@ -173,6 +192,7 @@
   </fieldset>
 
   <div class="transport">
+    <span class="pulse-marker" bind:this={pulseEl} aria-hidden="true"></span>
     <div class="actions">
       <button type="button" class="press-btn" disabled={pending} onclick={() => start("listen")}>Escuchar el patrón</button>
       <button type="button" class="press-btn" disabled={pending} onclick={() => start("practice")}>Practicar</button>
@@ -249,6 +269,7 @@
   .mute-option input { flex-shrink:0; }
   .actions { display:flex; gap:10px; flex-wrap:wrap; }
   .transport { display:grid; gap:12px; border-block:1px solid var(--line); padding-block:16px; }
+  .pulse-marker { display:block; width:12px; height:12px; border-radius:50%; background:var(--coral); opacity:.25; transform:scale(1); transform-origin:center; }
   .counter { display:flex; flex-direction:column; justify-content:center; gap:4px; min-height:64px; font:600 .875rem/1.6 "JetBrains Mono", monospace; }
   .counter span { font:500 .8125rem/1.5 "Manrope", sans-serif; color:var(--muted); }
   .pattern { min-width:0; display:grid; gap:16px; }

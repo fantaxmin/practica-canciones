@@ -6,6 +6,8 @@
   import { playNote, stopAll } from "../../lib/audio/synth";
   import { logWarmup, notation } from "../../lib/warmupLog";
   import { LEVELS, checkSelection, generateChallenge, spelledFor, spotKey, spotMidi, stringName, type FinderLevel, type FinderMode, type FretSpot, type SelectionResult, type SpotState } from "../../lib/noteFinder";
+  import { createAnimationGroup, reducedMotion } from "../../lib/motion";
+  import { nudgeWrong, popCorrect } from "../../lib/feedbackMotion";
   import FretboardPicker from "./FretboardPicker.svelte";
 
   let { instrument = $bindable("bajo") }: { instrument?: Instrument } = $props();
@@ -30,8 +32,13 @@
   let total = $state(0);
   let streak = $state(0);
   let heading = $state<HTMLElement>();
+  let optionsEl = $state<HTMLDivElement>();
+  const feedbackGroup = createAnimationGroup();
 
-  onDestroy(stopAll);
+  onDestroy(() => {
+    stopAll();
+    feedbackGroup.killAll();
+  });
 
   const answered = $derived(result !== null);
   const target = $derived(noteName(challenge.note, n));
@@ -57,6 +64,7 @@
 
   function next() {
     stopAll();
+    feedbackGroup.finishAll();
     challenge = generateChallenge(mode, level, tuning, Math.random, review, n);
     selected = [];
     result = null;
@@ -98,8 +106,24 @@
   function nameAnswer(option: string) {
     if (answered) return;
     chosenName = option;
+    const isCorrect = option === target;
     playNote(spotMidi(tuning, challenge.spot!) + (instrument === "bajo" ? 12 : 0), 0.8);
-    finish(option === target ? { hits: [challenge.spot!], wrong: [], missed: [], perfect: true } : { hits: [], wrong: [challenge.spot!], missed: [], perfect: false });
+    finish(isCorrect ? { hits: [challenge.spot!], wrong: [], missed: [], perfect: true } : { hits: [], wrong: [challenge.spot!], missed: [], perfect: false });
+
+    if ($reducedMotion) return;
+    feedbackGroup.finishAll();
+    void tick().then(() => {
+      if (!optionsEl || $reducedMotion) return;
+      const buttons = Array.from(optionsEl.querySelectorAll<HTMLButtonElement>("button[data-option]"));
+      const chosenBtn = buttons.find((b) => b.dataset.option === option);
+      const correctBtn = buttons.find((b) => b.dataset.option === target);
+      if (isCorrect) {
+        feedbackGroup.add(popCorrect(chosenBtn));
+      } else {
+        feedbackGroup.add(nudgeWrong(chosenBtn));
+        feedbackGroup.add(popCorrect(correctBtn));
+      }
+    });
   }
 
   function playAll() {
@@ -171,9 +195,9 @@
     disabled={answered || challenge.mode === "nombrar"} onPick={pick} />
 
   {#if challenge.mode === "nombrar" && challenge.options}
-    <div class="options" role="group" aria-label="Nombre de la nota">
+    <div class="options" role="group" aria-label="Nombre de la nota" bind:this={optionsEl}>
       {#each challenge.options as option (option)}
-        <button type="button" class="option" class:correct={answered && option === target} class:wrong={answered && option === chosenName && option !== target}
+        <button type="button" class="option" data-option={option} class:correct={answered && option === target} class:wrong={answered && option === chosenName && option !== target}
           disabled={answered} onclick={() => nameAnswer(option)}>{option}</button>
       {/each}
     </div>

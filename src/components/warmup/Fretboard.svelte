@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { ROOTS, noteName, pitchClass, type Notation, type SpelledNote } from "../../lib/theory/notes";
+  import { onDestroy, tick } from "svelte";
+  import { ROOTS, noteName, pitchClass, rootKey, type Notation, type SpelledNote } from "../../lib/theory/notes";
   import { formatDegree, type ScaleId } from "../../lib/theory/scales";
   import { scalePositions, type Tuning } from "../../lib/theory/fretboard";
   import { playNote } from "../../lib/audio/synth";
+  import { MOTION, createAnimationGroup, gsap, reducedMotion } from "../../lib/motion";
 
   let { tuning, root, scaleId, labels = "nota", notation = "latin", maxFret = 12 }: {
     tuning: Tuning;
@@ -18,11 +20,17 @@
   const GAP = 28;
   const TOP = 22;
   const INLAYS = [3, 5, 7, 9, 15, 17];
+  const MAX_WAVE_GROUPS = 12;
+
+  let svgEl = $state<SVGSVGElement>();
+  const waveGroup = createAnimationGroup();
+  let lastScaleKey = "";
 
   const strings = $derived(tuning.strings.length);
   const width = $derived(NUT_X + maxFret * FRET_W + 16);
   const height = $derived(TOP + (strings - 1) * GAP + 40);
   const positions = $derived(scalePositions(tuning, root, scaleId, maxFret));
+  const scaleKey = $derived(`${tuning.name}|${rootKey(root)}|${scaleId}|${maxFret}`);
   // La cuerda más aguda arriba, como en una tablatura.
   const stringY = (string: number) => TOP + (strings - 1 - string) * GAP;
   const fretX = (fret: number) => fret === 0 ? NUT_X - 20 : NUT_X + (fret - 0.5) * FRET_W;
@@ -31,10 +39,66 @@
     return note ? noteName(note, notation) : "";
   }));
   const summary = $derived(`${tuning.name}. Notas marcadas en ${positions.length} posiciones entre el traste 0 y el ${maxFret}.`);
+
+  $effect(() => {
+    const key = scaleKey;
+    if (key === lastScaleKey) return;
+    lastScaleKey = key;
+
+    waveGroup.finishAll();
+    if ($reducedMotion) return;
+
+    let cancelled = false;
+    void tick().then(() => {
+      if (cancelled || !svgEl || $reducedMotion) return;
+      const dots = Array.from(svgEl.querySelectorAll<SVGGElement>(".dot[data-fret]"));
+      if (!dots.length) return;
+
+      const byFret = new Map<number, SVGGElement[]>();
+      for (const dot of dots) {
+        const fret = Number(dot.dataset.fret ?? 0);
+        const list = byFret.get(fret);
+        if (list) list.push(dot);
+        else byFret.set(fret, [dot]);
+      }
+
+      const fretOrder = [...byFret.keys()].sort((a, b) => a - b);
+      const tl = gsap.timeline();
+      fretOrder.forEach((fret, groupIndex) => {
+        const groupDots = byFret.get(fret)!;
+        const startAt = Math.min(groupIndex, MAX_WAVE_GROUPS - 1) * 0.025;
+        for (const dot of groupDots) {
+          const origin = `${dot.dataset.cx ?? 0} ${dot.dataset.cy ?? 0}`;
+          tl.fromTo(
+            dot,
+            { scale: 0.55, opacity: 0, svgOrigin: origin },
+            {
+              scale: 1,
+              opacity: 1,
+              svgOrigin: origin,
+              duration: MOTION.duration.fast,
+              ease: MOTION.ease.back,
+              clearProps: "transform,transformOrigin,opacity",
+            },
+            startAt
+          );
+        }
+      });
+      waveGroup.add(tl);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  onDestroy(() => {
+    waveGroup.killAll();
+  });
 </script>
 
 <div class="fretboard">
-  <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height} role="img" aria-label={summary}>
+  <svg bind:this={svgEl} viewBox={`0 0 ${width} ${height}`} width={width} height={height} role="img" aria-label={summary}>
     <rect x={NUT_X} y={TOP - 8} width={maxFret * FRET_W} height={(strings - 1) * GAP + 16} rx="4" class="wood" />
     {#each INLAYS.filter((f) => f <= maxFret) as fret (fret)}
       <circle cx={NUT_X + (fret - 0.5) * FRET_W} cy={TOP + ((strings - 1) * GAP) / 2} r="5" class="inlay" />
@@ -54,10 +118,12 @@
     {/each}
     {#each positions as pos (`${pos.string}-${pos.fret}`)}
       {@const label = labels === "nota" ? noteName(pos.note, notation) : formatDegree(pos.degree)}
+      {@const cx = fretX(pos.fret)}
+      {@const cy = stringY(pos.string)}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <g class="dot" class:root={pos.isRoot} onpointerdown={() => playNote(pos.midi, 0.7)}>
-        <circle cx={fretX(pos.fret)} cy={stringY(pos.string)} r="11.5" />
-        <text x={fretX(pos.fret)} y={stringY(pos.string) + 4}>{label}</text>
+      <g class="dot" class:root={pos.isRoot} data-fret={pos.fret} data-cx={cx} data-cy={cy} onpointerdown={() => playNote(pos.midi, 0.7)}>
+        <circle {cx} {cy} r="11.5" />
+        <text x={cx} y={cy + 4}>{label}</text>
       </g>
     {/each}
   </svg>

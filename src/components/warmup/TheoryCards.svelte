@@ -1,10 +1,16 @@
 <script lang="ts">
+  import { onMount, tick } from "svelte";
   import { noteName, type SpelledNote } from "../../lib/theory/notes";
   import { MODE_ORDER, getScale, formatDegree, type ScaleId } from "../../lib/theory/scales";
   import { CHORD_SCALE_GUIDE, circleOfFifths, signatureLabel } from "../../lib/theory/relatives";
   import { notation } from "../../lib/warmupLog";
+  import { createAnimationGroup, reducedMotion } from "../../lib/motion";
+  import { revealFlip2D } from "../../lib/feedbackMotion";
 
   let { onExplore }: { onExplore: (root: SpelledNote, scale: ScaleId) => void } = $props();
+
+  let theoryEl = $state<HTMLDivElement>();
+  const revealGroup = createAnimationGroup();
 
   const n = $derived($notation);
   const circle = circleOfFifths();
@@ -14,9 +20,24 @@
     return { x: 150 + Math.cos(angle) * r, y: 150 + Math.sin(angle) * r };
   };
   const MODE_EXAMPLES: SpelledNote[] = [0, 1, 2, 3, 4, 5, 6].map((letter) => ({ letter, accidental: 0 }));
+
+  onMount(() => {
+    let destroyed = false;
+    if (!$reducedMotion) {
+      void tick().then(() => {
+        if (destroyed || !theoryEl || $reducedMotion) return;
+        const cards = theoryEl.querySelectorAll<HTMLElement>("article.card");
+        revealGroup.add(revealFlip2D(cards));
+      });
+    }
+    return () => {
+      destroyed = true;
+      revealGroup.killAll();
+    };
+  });
 </script>
 
-<div class="theory">
+<div class="theory" bind:this={theoryEl}>
   <article class="card">
     <h3>Relativas mayor y menor</h3>
     <p>Cada tonalidad mayor tiene una <strong>relativa menor</strong> con <em>exactamente las mismas notas</em>. Lo que cambia es la nota que se siente como "casa".</p>

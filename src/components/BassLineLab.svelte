@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { BASS_PROGRESSIONS, BASS_STYLES, chordIntervals, generateBassLine, type BassStyle, type BassDegree } from "../lib/bassLines";
-  import { playChord, playNote, stopAll } from "../lib/audio/synth";
+  import { audioContext, playChord, playNote, stopAll } from "../lib/audio/synth";
+  import { audioPosition, pulseAppearance } from "../lib/audioVisual";
+  import { reducedMotion } from "../lib/motion";
   import { BASS_EADG } from "../lib/theory/fretboard";
   import { noteName, pitchClass, rootKey, mod } from "../lib/theory/notes";
   import { triadName } from "../lib/theory/relatives";
@@ -18,6 +20,10 @@
   let notice = $state("");
   let audioError = $state("");
   let timer: ReturnType<typeof setInterval> | undefined;
+  let frame = 0;
+  let generation = 0;
+  let resumeVisual: (() => void) | undefined;
+  let pulseEl = $state<HTMLSpanElement>();
   const key = $derived(ROUTINE_KEYS.find((item) => rootKey(item) === keyId) ?? ROUTINE_KEYS[0]);
   const line = $derived(generateBassLine(key, progressionId, styleId));
   const style = $derived(BASS_STYLES.find((item) => item.id === styleId)!);
@@ -31,36 +37,63 @@
   const degreeLabel = (degree: BassDegree) => ({ R: "Fundamental", "3": "Tercera", "5": "Quinta", "8": "Octava", aprox: "Aproximación" }[degree]);
 
   function stop() {
+    generation++;
     clearInterval(timer);
     timer = undefined;
+    cancelAnimationFrame(frame);
+    resumeVisual = undefined;
+    if (pulseEl) { pulseEl.style.transform = "scale(1)"; pulseEl.style.opacity = ".25"; }
     stopAll();
     playing = null;
     activeBeat = -1;
   }
   function changed() { stop(); notice = ""; audioError = ""; }
   onDestroy(stop);
+  onMount(() => {
+    const visibility = () => {
+      cancelAnimationFrame(frame);
+      if (!document.hidden) resumeVisual?.();
+    };
+    document.addEventListener("visibilitychange", visibility);
+    return () => document.removeEventListener("visibilitychange", visibility);
+  });
 
-  function listen(mode: "line" | "chords") {
+  async function listen(mode: "line" | "chords") {
     stop();
     audioError = "";
+    const token = generation;
     const exercise = line;
-    const step = 60 / tempo;
+    const sessionTempo = tempo;
+    const step = 60 / sessionTempo;
     const total = exercise.bars.length * 4;
-    // Un pequeño margen permite programar bajo y acordes en el mismo instante.
-    const start = performance.now() / 1000 + 0.06;
+    let ctx: AudioContext;
+    try {
+      ctx = audioContext();
+      await ctx.resume();
+    } catch {
+      if (token === generation) audioError = "No se pudo reproducir el audio. Pulsa Escuchar para intentarlo de nuevo.";
+      return;
+    }
+    if (token !== generation || document.hidden) return;
+    // Audio y visual comparten el mismo origen; rAF nunca programa sonidos.
+    const start = ctx.currentTime + 0.06;
     let scheduled = 0;
     let endAt = Infinity;
     playing = mode;
+    function updateEnd(elapsed: number) {
+      if (!loop && endAt === Infinity) endAt = (Math.floor(Math.max(0, elapsed) / (total * step)) + 1) * total;
+      if (loop) endAt = Infinity;
+    }
     function pump() {
+      if (token !== generation) return;
       try {
-        const now = performance.now() / 1000;
+        if (ctx.state !== "running") return;
+        const now = ctx.currentTime;
         const elapsed = now - start;
-        if (!loop && endAt === Infinity) endAt = (Math.floor(Math.max(0, elapsed) / (total * step)) + 1) * total;
-        if (loop) endAt = Infinity;
+        updateEnd(elapsed);
         if (elapsed >= endAt * step) { stop(); return; }
-        activeBeat = elapsed < 0 ? -1 : Math.floor(elapsed / step) % total;
         // Si el hilo se retrasa, omite pulsos vencidos en vez de tocarlos juntos.
-        scheduled = Math.max(scheduled, Math.floor(Math.max(0, elapsed) / step));
+        scheduled = Math.max(scheduled, Math.ceil(Math.max(0, elapsed) / step));
         while (start + scheduled * step < now + 0.12 && scheduled < endAt) {
           const beat = scheduled % total;
           const bar = exercise.bars[Math.floor(beat / 4)];
@@ -77,8 +110,26 @@
         audioError = "No se pudo reproducir el audio. Pulsa Escuchar para intentarlo de nuevo.";
       }
     }
+    function animate() {
+      if (token !== generation || document.hidden) return;
+      const now = ctx.currentTime;
+      updateEnd(now - start);
+      if (now >= start + endAt * step) { stop(); return; }
+      const position = audioPosition(now, start, sessionTempo, 1, total);
+      activeBeat = position.step;
+      if (pulseEl) {
+        const pulse = pulseAppearance(position, $reducedMotion, ctx.state === "running");
+        pulseEl.style.transform = `scale(${pulse.scale})`;
+        pulseEl.style.opacity = String(pulse.opacity);
+      }
+      frame = requestAnimationFrame(animate);
+    }
     pump();
-    if (playing) timer = setInterval(pump, 25);
+    if (playing) {
+      timer = setInterval(pump, 25);
+      resumeVisual = () => { cancelAnimationFrame(frame); animate(); };
+      resumeVisual();
+    }
   }
   function save() {
     logWarmup({ kind: "lineas", detail: `${line.progression.label} · ${style.label} · ${keyLabel}` });
@@ -117,6 +168,7 @@
   <p class="explanation">{style.explanation}</p>
 
   <div class="transport">
+    <span class="pulse-marker" bind:this={pulseEl} aria-hidden="true"></span>
     <button type="button" class="press-btn" aria-pressed={playing === "line"} onclick={() => listen("line")}>Escuchar</button>
     <button type="button" class="press-btn ghost" aria-pressed={playing === "chords"} onclick={() => listen("chords")}>Solo acordes</button>
     <button type="button" class="press-btn ghost" disabled={!playing} onclick={stop}>Detener</button>
@@ -196,6 +248,7 @@
   input[type="range"] { width:100%; min-width:0; min-height:44px; margin:0; accent-color:var(--coral); }
   .explanation { font-size:.875rem; max-width:70ch; }
   .transport, .legend, footer { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+  .pulse-marker { display:block; flex-shrink:0; width:12px; height:12px; border-radius:50%; background:var(--coral); opacity:.25; transform:scale(1); transform-origin:center; }
   .loop { display:flex; align-items:center; min-height:44px; cursor:pointer; }
   .loop input { accent-color:var(--coral); width:18px; height:18px; }
   button { min-height:44px; } button:disabled { opacity:.5; cursor:default; }
